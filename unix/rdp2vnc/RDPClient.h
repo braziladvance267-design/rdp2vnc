@@ -77,6 +77,7 @@ private:
   static void rdpPointerFree(rdpContext* context, rdpPointer* pointer);
   static BOOL rdpPointerSet(rdpContext* context, const rdpPointer* pointer);
   static BOOL rdpPointerSetPosition(rdpContext* context, UINT32 x, UINT32 y);
+  static BOOL rdpDesktopResize(rdpContext* context);
   bool beginPaint();
   bool endPaint();
   bool preConnect();
@@ -84,6 +85,7 @@ private:
   void postDisconnect();
   bool pointerSet(RDPPointerImpl* pointer);
   bool pointerSetPosition(uint32_t x, uint32_t y);
+  bool desktopResize();
   void eventLoop();
 
   int argc;

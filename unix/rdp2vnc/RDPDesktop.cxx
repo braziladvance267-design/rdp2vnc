@@ -41,7 +41,7 @@ static rfb::LogWriter vlog("RDPDesktop");
 //};
 
 RDPDesktop::RDPDesktop(Geometry* geometry_, RDPClient* client_)
-  : geometry(geometry_), pb(0), server(0), client(client_),
+  : geometry(geometry_), server(0), client(client_),
     running(false), ledMasks(), ledState(0),
     codeMap(0), codeMapLen(0)
 {
@@ -52,10 +52,10 @@ RDPDesktop::~RDPDesktop() {
 
 void RDPDesktop::start(VNCServer* vs) {
 
-  pb = new RDPPixelBuffer(geometry->getRect(), client);
+  pb.reset(new RDPPixelBuffer(geometry->getRect(), client));
 
   server = vs;
-  server->setPixelBuffer(pb, computeScreenLayout());
+  server->setPixelBuffer(pb.get(), computeScreenLayout());
 
   //server->setLEDState(ledState);
 
@@ -76,9 +76,6 @@ void RDPDesktop::stop() {
 
   server->setPixelBuffer(0);
   server = 0;
-
-  delete pb;
-  pb = 0;
 }
 
 void RDPDesktop::terminate() {
@@ -127,5 +124,14 @@ unsigned int RDPDesktop::setScreenLayout(int fb_width, int fb_height,
 bool RDPDesktop::setFirstCursor(std::unique_ptr<RDPCursor> &cursor)
 {
   firstCursor = std::move(cursor);
+  return true;
+}
+
+bool RDPDesktop::resize() {
+  int width = client->width();
+  int height = client->height();
+  geometry->recalc(width, height);
+  pb.reset(new RDPPixelBuffer(geometry->getRect(), client));
+  server->setPixelBuffer(pb.get(), computeScreenLayout());
   return true;
 }

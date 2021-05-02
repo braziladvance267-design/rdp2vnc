@@ -192,6 +192,14 @@ BOOL RDPClient::rdpPointerSetPosition(rdpContext* context, UINT32 x, UINT32 y) {
   return ctx->client->pointerSetPosition(x, y);
 }
 
+BOOL RDPClient::rdpDesktopResize(rdpContext* context) {
+  if (!context) {
+    return FALSE;
+  }
+  RDPContext* ctx = (RDPContext *)context;
+  return ctx->client->desktopResize();
+}
+
 bool RDPClient::beginPaint() {
   return true;
 }
@@ -214,7 +222,6 @@ bool RDPClient::endPaint() {
     int w = cinvalid[i].w;
     int h = cinvalid[i].h;
     if (desktop && desktop->server) {
-      //cerr << "D:" << this_thread::get_id() << endl;
       lock_guard<mutex> lock(mutex_);
       desktop->server->add_changed(Region(Rect(x, y, x + w, y + h)));
     }
@@ -250,6 +257,7 @@ bool RDPClient::postConnect() {
 
   instance->update->BeginPaint = rdpBeginPaint;
   instance->update->EndPaint = rdpEndPaint;
+  instance->update->DesktopResize = rdpDesktopResize;
   hasConnected = true;
   return true;
 }
@@ -268,7 +276,6 @@ bool RDPClient::pointerSet(RDPPointerImpl* pointer) {
   int y = pointer->y;
   Point hotspot(x, y);
   if (desktop && desktop->server) {
-    //cerr << "C:" << this_thread::get_id() << endl;
     lock_guard<mutex> lock(mutex_);
     desktop->server->setCursor(width, height, hotspot, pointer->buffer);
   } else {
@@ -279,7 +286,6 @@ bool RDPClient::pointerSet(RDPPointerImpl* pointer) {
 
 bool RDPClient::pointerSetPosition(uint32_t x, uint32_t y) {
   if (desktop && desktop->server) {
-    //cerr << "B:" << this_thread::get_id() << endl;
     lock_guard<mutex> lock(mutex_);
     desktop->server->setCursorPos(Point(x, y), false);
   } else {
@@ -289,6 +295,17 @@ bool RDPClient::pointerSetPosition(uint32_t x, uint32_t y) {
     }
   }
   return true;
+}
+
+bool RDPClient::desktopResize() {
+  lock_guard<mutex> lock(mutex_);
+  if (!gdi_resize(context->gdi, context->settings->DesktopWidth, context->settings->DesktopHeight)) {
+    return false;
+  }
+  if (!desktop) {
+    return true;
+  }
+  return desktop->resize();
 }
 
 RDPClient::RDPClient(int argc_, char** argv_)
@@ -438,19 +455,30 @@ void RDPClient::eventLoop() {
 }
 
 int RDPClient::width() {
-  return context->gdi->primary->bitmap->width;
+  if (context && context->gdi && context->gdi->primary && context->gdi->primary->bitmap) {
+    return context->gdi->primary->bitmap->width;
+  } else {
+    return -1;
+  }
 }
 
 int RDPClient::height() {
-  return context->gdi->primary->bitmap->height;
+  if (context && context->gdi && context->gdi->primary && context->gdi->primary->bitmap) {
+    return context->gdi->primary->bitmap->height;
+  } else {
+    return -1;
+  }
 }
 
 rdr::U8* RDPClient::getBuffer() {
-  return (rdr::U8*)context->gdi->primary->bitmap->data;
+  if (context && context->gdi && context->gdi->primary && context->gdi->primary->bitmap) {
+    return (rdr::U8*)context->gdi->primary->bitmap->data;
+  } else {
+    return NULL;
+  }
 }
 
 void RDPClient::pointerEvent(const Point& pos, int buttonMask) {
-  //cerr << "A:" << this_thread::get_id() << endl;
   uint16_t flags = PTR_FLAGS_MOVE;
   bool left = buttonMask & 1;
   bool middle = buttonMask & 2;

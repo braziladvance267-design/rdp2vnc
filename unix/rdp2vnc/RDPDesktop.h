@@ -55,7 +55,7 @@ public:
 protected:
   friend class RDPClient;
   Geometry* geometry;
-  RDPPixelBuffer* pb;
+  std::unique_ptr<RDPPixelBuffer> pb;
   rfb::VNCServer* server;
   RDPClient *client;
   bool running;
@@ -66,6 +66,7 @@ protected:
   std::unique_ptr<RDPCursor> firstCursor;
   rfb::ScreenSet computeScreenLayout();
   bool setFirstCursor(std::unique_ptr<RDPCursor> &cursor);
+  bool resize();
 };
 
 #endif // __RDPDESKTOP_H__
