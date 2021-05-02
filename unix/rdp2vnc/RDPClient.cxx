@@ -200,6 +200,14 @@ BOOL RDPClient::rdpDesktopResize(rdpContext* context) {
   return ctx->client->desktopResize();
 }
 
+BOOL RDPClient::rdpPlaySound(rdpContext* context, const PLAY_SOUND_UPDATE* playSound) {
+  if (!context) {
+    return FALSE;
+  }
+  RDPContext* ctx = (RDPContext *)context;
+  return ctx->client->playSound(playSound);
+}
+
 bool RDPClient::beginPaint() {
   return true;
 }
@@ -258,6 +266,7 @@ bool RDPClient::postConnect() {
   instance->update->BeginPaint = rdpBeginPaint;
   instance->update->EndPaint = rdpEndPaint;
   instance->update->DesktopResize = rdpDesktopResize;
+  instance->update->PlaySound = rdpPlaySound;
   hasConnected = true;
   return true;
 }
@@ -306,6 +315,14 @@ bool RDPClient::desktopResize() {
     return true;
   }
   return desktop->resize();
+}
+
+bool RDPClient::playSound(const PLAY_SOUND_UPDATE* playSound) {
+  if (desktop && desktop->server) {
+    lock_guard<mutex> lock(mutex_);
+    desktop->server->bell();
+  }
+  return true;
 }
 
 RDPClient::RDPClient(int argc_, char** argv_)

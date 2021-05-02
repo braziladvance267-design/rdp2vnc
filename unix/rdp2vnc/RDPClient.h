@@ -78,6 +78,7 @@ private:
   static BOOL rdpPointerSet(rdpContext* context, const rdpPointer* pointer);
   static BOOL rdpPointerSetPosition(rdpContext* context, UINT32 x, UINT32 y);
   static BOOL rdpDesktopResize(rdpContext* context);
+  static BOOL rdpPlaySound(rdpContext* context, const PLAY_SOUND_UPDATE* playSound);
   bool beginPaint();
   bool endPaint();
   bool preConnect();
@@ -86,6 +87,7 @@ private:
   bool pointerSet(RDPPointerImpl* pointer);
   bool pointerSetPosition(uint32_t x, uint32_t y);
   bool desktopResize();
+  bool playSound(const PLAY_SOUND_UPDATE* playSound);
   void eventLoop();
 
   int argc;

@@ -116,7 +116,7 @@ ScreenSet RDPDesktop::computeScreenLayout()
 }
 
 unsigned int RDPDesktop::setScreenLayout(int fb_width, int fb_height,
-                                       const rfb::ScreenSet& layout)
+                                         const rfb::ScreenSet& layout)
 {
   return rfb::resultProhibited;
 }
@@ -131,7 +131,9 @@ bool RDPDesktop::resize() {
   int width = client->width();
   int height = client->height();
   geometry->recalc(width, height);
-  pb.reset(new RDPPixelBuffer(geometry->getRect(), client));
-  server->setPixelBuffer(pb.get(), computeScreenLayout());
+  if (server) {
+    pb.reset(new RDPPixelBuffer(geometry->getRect(), client));
+    server->setPixelBuffer(pb.get(), computeScreenLayout());
+  }
   return true;
 }
