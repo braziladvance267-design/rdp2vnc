@@ -94,7 +94,7 @@ struct RDPPointerImpl {
   }
   ~RDPPointerImpl() {
     if (buffer) {
-      delete buffer;
+      delete[] buffer;
     }
   }
   rdpPointer* pointer;
@@ -178,6 +178,9 @@ BOOL RDPClient::rdpPointerSet(rdpContext* context, const rdpPointer* pointer) {
   }
   RDPContext* ctx = (RDPContext *)context;
   RDPPointer* ptr = (RDPPointer *)pointer;
+  if (!ctx->client || !ptr->impl) {
+    return FALSE;
+  }
   return ctx->client->pointerSet(ptr->impl);
 }
 
@@ -210,7 +213,7 @@ bool RDPClient::endPaint() {
     int y = cinvalid[i].y;
     int w = cinvalid[i].w;
     int h = cinvalid[i].h;
-    if (desktop) {
+    if (desktop && desktop->server) {
       desktop->server->add_changed(Region(Rect(x, y, x + w, y + h)));
     }
   }
@@ -262,7 +265,7 @@ bool RDPClient::pointerSet(RDPPointerImpl* pointer) {
   int x = pointer->x;
   int y = pointer->y;
   Point hotspot(x, y);
-  if (desktop) {
+  if (desktop && desktop->server) {
     desktop->server->setCursor(width, height, hotspot, pointer->buffer);
   } else {
     firstCursor.reset(new RDPCursor(pointer->buffer, pointer->size, width, height, x, y));
@@ -422,8 +425,11 @@ void RDPClient::eventLoop() {
     if (WaitForMultipleObjects(numHandles, handles, FALSE, 10000) == WAIT_FAILED) {
       return;
     }
-    if (!freerdp_check_event_handles(context)) {
-      return;
+    {
+      lock_guard<mutex> lock(mutex_);
+      if (!freerdp_check_event_handles(context)) {
+        return;
+      }
     }
   }
 }
@@ -501,4 +507,8 @@ void RDPClient::keyEvent(rdr::U32 keysym, rdr::U32 xtcode, bool down) {
     uint32_t keyUTF32 = xkb_keysym_to_utf32(keysym);
     freerdp_input_send_unicode_keyboard_event(context->input, flags, keyUTF32);
   }
+}
+
+std::mutex &RDPClient::getMutex() {
+  return mutex_;
 }

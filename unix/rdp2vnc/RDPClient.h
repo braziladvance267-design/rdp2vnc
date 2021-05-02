@@ -24,6 +24,7 @@
 #define __RDPCLIENT_H__
 
 #include <memory>
+#include <mutex>
 #include <thread>
 #include <inttypes.h>
 #include <unistd.h>
@@ -63,6 +64,7 @@ public:
   rdr::U8* getBuffer();
   void pointerEvent(const rfb::Point& pos, int buttonMask);
   void keyEvent(rdr::U32 keysym, rdr::U32 xtcode, bool down);
+  std::mutex &getMutex();
 private:
   friend class RDPDesktop;
   static BOOL rdpBeginPaint(rdpContext* context);
@@ -93,6 +95,7 @@ private:
   int oldButtonMask;
   std::unique_ptr<std::thread> thread_;
   std::unique_ptr<RDPCursor> firstCursor;
+  std::mutex mutex_;
 };
 
 #endif // __RDPCLIENT_H__

@@ -18,6 +18,6 @@ target_link_libraries(rdp2vnc tx rfb network rdr unixcommon)
 
 target_link_libraries(rdp2vnc ${PACKAGES_LIBRARIES})
 target_include_directories(rdp2vnc PRIVATE ${PACKAGES_INCLUDE_DIRS})
-target_compile_options(rdp2vnc PRIVATE ${PACKAGES_CFLAGS_OTHER})
+target_compile_options(rdp2vnc PUBLIC ${PACKAGES_CFLAGS_OTHER})
 
 install(TARGETS rdp2vnc DESTINATION ${CMAKE_INSTALL_FULL_BINDIR})

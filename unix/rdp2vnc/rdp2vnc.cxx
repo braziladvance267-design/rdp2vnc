@@ -20,6 +20,7 @@
 // FIXME: Check cases when screen width/height is not a multiply of 32.
 //        e.g. 800x600.
 
+#include <mutex>
 #include <strings.h>
 #include <sys/types.h>
 #include <sys/stat.h>
@@ -269,7 +270,7 @@ int main(int argc, char** argv)
         (*i)->setFilter(&fileTcpFilter);
     delete[] hostsData;
 
-    //rdpClient.startThread();
+    rdpClient.startThread();
 
     while (!caughtSignal) {
       int wait_ms;
@@ -300,10 +301,10 @@ int main(int argc, char** argv)
         }
       }
 
-      if (!rdpClient.registerFileDescriptors(&rfds, &wfds)) {
-        vlog.error("RDP Client connection is broken");
-        throw rdr::EndOfStream();
-      }
+      //if (!rdpClient.registerFileDescriptors(&rfds, &wfds)) {
+      //  vlog.error("RDP Client connection is broken");
+      //  throw rdr::EndOfStream();
+      //}
 
       tv.tv_sec = 0;
       tv.tv_usec = 10000;
@@ -343,18 +344,23 @@ int main(int argc, char** argv)
         continue;
 
       // Process events on existing VNC connections
-      for (i = sockets.begin(); i != sockets.end(); i++) {
-        if (FD_ISSET((*i)->getFd(), &rfds))
-          server.processSocketReadEvent(*i);
-        if (FD_ISSET((*i)->getFd(), &wfds))
-          server.processSocketWriteEvent(*i);
+      {
+        std::lock_guard<std::mutex> lock(rdpClient.getMutex());
+        for (i = sockets.begin(); i != sockets.end(); i++) {
+          if (FD_ISSET((*i)->getFd(), &rfds)) {
+            server.processSocketReadEvent(*i);
+          }
+          if (FD_ISSET((*i)->getFd(), &wfds)) {
+            server.processSocketWriteEvent(*i);
+          }
+        }
       }
 
       // Process events on RDP connection
-      if (!rdpClient.processsEvents()) {
-        vlog.error("RDP Client connection is broken");
-        throw rdr::EndOfStream();
-      }
+      //if (!rdpClient.processsEvents()) {
+      //  vlog.error("RDP Client connection is broken");
+      //  throw rdr::EndOfStream();
+      //}
     }
 
   } catch (rdr::Exception &e) {
