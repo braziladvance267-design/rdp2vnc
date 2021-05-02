@@ -152,7 +152,7 @@ BOOL RDPClient::rdpPointerNew(rdpContext* context, rdpPointer* pointer) {
   if (!context || !pointer) {
     return FALSE;
   }
-  RDPContext* ctx = (RDPContext *)context;
+  //RDPContext* ctx = (RDPContext *)context;
   RDPPointer* ptr = (RDPPointer *)pointer;
   ptr->impl = new RDPPointerImpl(pointer);
   if (!ptr->impl) {
@@ -165,7 +165,7 @@ void RDPClient::rdpPointerFree(rdpContext* context, rdpPointer* pointer) {
   if (!context || !pointer) {
     return;
   }
-  RDPContext* ctx = (RDPContext *)context;
+  //RDPContext* ctx = (RDPContext *)context;
   RDPPointer* ptr = (RDPPointer *)pointer;
   if (ptr->impl) {
     delete ptr->impl;
@@ -214,6 +214,8 @@ bool RDPClient::endPaint() {
     int w = cinvalid[i].w;
     int h = cinvalid[i].h;
     if (desktop && desktop->server) {
+      //cerr << "D:" << this_thread::get_id() << endl;
+      lock_guard<mutex> lock(mutex_);
       desktop->server->add_changed(Region(Rect(x, y, x + w, y + h)));
     }
   }
@@ -223,8 +225,8 @@ bool RDPClient::endPaint() {
 }
 
 bool RDPClient::preConnect() {
-  rdpSettings* settings;
-  settings = instance->settings;
+  //rdpSettings* settings;
+  //settings = instance->settings;
   if (!freerdp_client_load_addins(instance->context->channels, instance->settings)) {
     return false;
   }
@@ -266,6 +268,8 @@ bool RDPClient::pointerSet(RDPPointerImpl* pointer) {
   int y = pointer->y;
   Point hotspot(x, y);
   if (desktop && desktop->server) {
+    //cerr << "C:" << this_thread::get_id() << endl;
+    lock_guard<mutex> lock(mutex_);
     desktop->server->setCursor(width, height, hotspot, pointer->buffer);
   } else {
     firstCursor.reset(new RDPCursor(pointer->buffer, pointer->size, width, height, x, y));
@@ -274,7 +278,9 @@ bool RDPClient::pointerSet(RDPPointerImpl* pointer) {
 }
 
 bool RDPClient::pointerSetPosition(uint32_t x, uint32_t y) {
-  if (desktop) {
+  if (desktop && desktop->server) {
+    //cerr << "B:" << this_thread::get_id() << endl;
+    lock_guard<mutex> lock(mutex_);
     desktop->server->setCursorPos(Point(x, y), false);
   } else {
     if (firstCursor) {
@@ -387,7 +393,7 @@ bool RDPClient::registerFileDescriptors(fd_set *rfds, fd_set *wfds) {
   if (numHandles == 0) {
     return false;
   }
-  for (int i = 0; i < numHandles; ++i) {
+  for (DWORD i = 0; i < numHandles; ++i) {
     int fd = GetEventFileDescriptor(handles[i]);
     FD_SET(fd, rfds);
   }
@@ -425,11 +431,8 @@ void RDPClient::eventLoop() {
     if (WaitForMultipleObjects(numHandles, handles, FALSE, 10000) == WAIT_FAILED) {
       return;
     }
-    {
-      lock_guard<mutex> lock(mutex_);
-      if (!freerdp_check_event_handles(context)) {
-        return;
-      }
+    if (!freerdp_check_event_handles(context)) {
+      return;
     }
   }
 }
@@ -447,6 +450,7 @@ rdr::U8* RDPClient::getBuffer() {
 }
 
 void RDPClient::pointerEvent(const Point& pos, int buttonMask) {
+  //cerr << "A:" << this_thread::get_id() << endl;
   uint16_t flags = PTR_FLAGS_MOVE;
   bool left = buttonMask & 1;
   bool middle = buttonMask & 2;

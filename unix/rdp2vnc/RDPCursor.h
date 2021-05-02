@@ -31,7 +31,7 @@ struct RDPCursor {
   }
   ~RDPCursor() {
     if (data) {
-      delete data;
+      delete[] data;
     }
   }
   uint8_t* data;

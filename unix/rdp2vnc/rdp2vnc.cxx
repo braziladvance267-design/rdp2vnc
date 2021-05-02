@@ -21,6 +21,8 @@
 //        e.g. 800x600.
 
 #include <mutex>
+#include <thread>
+#include <iostream>
 #include <strings.h>
 #include <sys/types.h>
 #include <sys/stat.h>
@@ -42,6 +44,7 @@
 
 extern char buildtime[];
 
+using namespace std;
 using namespace rfb;
 using namespace network;
 
@@ -273,31 +276,33 @@ int main(int argc, char** argv)
     rdpClient.startThread();
 
     while (!caughtSignal) {
-      int wait_ms;
       struct timeval tv;
       fd_set rfds, wfds;
       std::list<Socket*> sockets;
       std::list<Socket*>::iterator i;
+      {
+        std::lock_guard<std::mutex> lock(rdpClient.getMutex());
+        
+        FD_ZERO(&rfds);
+        FD_ZERO(&wfds);
 
-      FD_ZERO(&rfds);
-      FD_ZERO(&wfds);
-
-      for (std::list<SocketListener*>::iterator i = listeners.begin();
-           i != listeners.end();
-           i++)
-        FD_SET((*i)->getFd(), &rfds);
-
-      server.getSockets(&sockets);
-      int clients_connected = 0;
-      for (i = sockets.begin(); i != sockets.end(); i++) {
-        if ((*i)->isShutdown()) {
-          server.removeSocket(*i);
-          delete (*i);
-        } else {
+        for (std::list<SocketListener*>::iterator i = listeners.begin();
+             i != listeners.end();
+             i++)
           FD_SET((*i)->getFd(), &rfds);
-          if ((*i)->outStream().hasBufferedData())
-            FD_SET((*i)->getFd(), &wfds);
-          clients_connected++;
+
+        server.getSockets(&sockets);
+        int clients_connected = 0;
+        for (i = sockets.begin(); i != sockets.end(); i++) {
+          if ((*i)->isShutdown()) {
+            server.removeSocket(*i);
+            delete (*i);
+          } else {
+            FD_SET((*i)->getFd(), &rfds);
+            if ((*i)->outStream().hasBufferedData())
+              FD_SET((*i)->getFd(), &wfds);
+            clients_connected++;
+          }
         }
       }
 
@@ -320,32 +325,33 @@ int main(int argc, char** argv)
         }
       }
 
-      // Accept new VNC connections
-      for (std::list<SocketListener*>::iterator i = listeners.begin();
-           i != listeners.end();
-           i++) {
-        if (FD_ISSET((*i)->getFd(), &rfds)) {
-          Socket* sock = (*i)->accept();
-          if (sock) {
-            server.addSocket(sock);
-          } else {
-            vlog.status("Client connection rejected");
-          }
-        }
-      }
 
-      Timer::checkTimeouts();
-
-      // Client list could have been changed.
-      server.getSockets(&sockets);
-
-      // Nothing more to do if there are no client connections.
-      if (sockets.empty())
-        continue;
-
-      // Process events on existing VNC connections
       {
         std::lock_guard<std::mutex> lock(rdpClient.getMutex());
+        // Accept new VNC connections
+        for (std::list<SocketListener*>::iterator i = listeners.begin();
+             i != listeners.end();
+             i++) {
+          if (FD_ISSET((*i)->getFd(), &rfds)) {
+            Socket* sock = (*i)->accept();
+            if (sock) {
+              server.addSocket(sock);
+            } else {
+              vlog.status("Client connection rejected");
+            }
+          }
+        }
+
+        Timer::checkTimeouts();
+
+        // Client list could have been changed.
+        server.getSockets(&sockets);
+
+        // Nothing more to do if there are no client connections.
+        if (sockets.empty())
+          continue;
+
+        // Process events on existing VNC connections
         for (i = sockets.begin(); i != sockets.end(); i++) {
           if (FD_ISSET((*i)->getFd(), &rfds)) {
             server.processSocketReadEvent(*i);

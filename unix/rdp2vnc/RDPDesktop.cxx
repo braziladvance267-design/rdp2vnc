@@ -36,9 +36,9 @@ using namespace rfb;
 static rfb::LogWriter vlog("RDPDesktop");
 
 // order is important as it must match RFB extension
-static const char * ledNames[RDPDESKTOP_N_LEDS] = {
-  "Scroll Lock", "Num Lock", "Caps Lock"
-};
+//static const char * ledNames[RDPDESKTOP_N_LEDS] = {
+//  "Scroll Lock", "Num Lock", "Caps Lock"
+//};
 
 RDPDesktop::RDPDesktop(Geometry* geometry_, RDPClient* client_)
   : geometry(geometry_), pb(0), server(0), client(client_),
