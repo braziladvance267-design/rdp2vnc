@@ -74,7 +74,7 @@ struct RDPPointerImpl {
     if (!gdi) {
       return false;
     }
-    uint32_t cursorFormat = PIXEL_FORMAT_RGBA32;
+    uint32_t cursorFormat = PIXEL_FORMAT_BGRA32;
     x = pointer->xPos;
     y = pointer->yPos;
     width = pointer->width;
@@ -230,7 +230,6 @@ bool RDPClient::endPaint() {
     int w = cinvalid[i].w;
     int h = cinvalid[i].h;
     if (desktop && desktop->server) {
-      lock_guard<mutex> lock(mutex_);
       desktop->server->add_changed(Region(Rect(x, y, x + w, y + h)));
     }
   }
@@ -250,7 +249,7 @@ bool RDPClient::preConnect() {
 
 bool RDPClient::postConnect() {
   // Init GDI
-  if (!gdi_init(instance, PIXEL_FORMAT_RGBX32)) {
+  if (!gdi_init(instance, PIXEL_FORMAT_BGRX32)) {
     return false;
   }
 
@@ -285,7 +284,6 @@ bool RDPClient::pointerSet(RDPPointerImpl* pointer) {
   int y = pointer->y;
   Point hotspot(x, y);
   if (desktop && desktop->server) {
-    lock_guard<mutex> lock(mutex_);
     desktop->server->setCursor(width, height, hotspot, pointer->buffer);
   } else {
     firstCursor.reset(new RDPCursor(pointer->buffer, pointer->size, width, height, x, y));
@@ -295,7 +293,6 @@ bool RDPClient::pointerSet(RDPPointerImpl* pointer) {
 
 bool RDPClient::pointerSetPosition(uint32_t x, uint32_t y) {
   if (desktop && desktop->server) {
-    lock_guard<mutex> lock(mutex_);
     desktop->server->setCursorPos(Point(x, y), false);
   } else {
     if (firstCursor) {
@@ -307,7 +304,6 @@ bool RDPClient::pointerSetPosition(uint32_t x, uint32_t y) {
 }
 
 bool RDPClient::desktopResize() {
-  lock_guard<mutex> lock(mutex_);
   if (!gdi_resize(context->gdi, context->settings->DesktopWidth, context->settings->DesktopHeight)) {
     return false;
   }
@@ -319,7 +315,6 @@ bool RDPClient::desktopResize() {
 
 bool RDPClient::playSound(const PLAY_SOUND_UPDATE* playSound) {
   if (desktop && desktop->server) {
-    lock_guard<mutex> lock(mutex_);
     desktop->server->bell();
   }
   return true;
@@ -457,16 +452,22 @@ void RDPClient::setRDPDesktop(RDPDesktop* desktop_) {
 
 void RDPClient::eventLoop() {
   HANDLE handles[64];
+  DWORD numHandles;
   while (!freerdp_shall_disconnect(instance)) {
-    DWORD numHandles = freerdp_get_event_handles(context, handles, 64);
+    {
+      lock_guard<mutex> lock(mutex_);
+      numHandles = freerdp_get_event_handles(context, handles, 64);
+    }
     if (numHandles == 0) {
       return;
     }
     if (WaitForMultipleObjects(numHandles, handles, FALSE, 10000) == WAIT_FAILED) {
       return;
-    }
-    if (!freerdp_check_event_handles(context)) {
-      return;
+    }{
+      lock_guard<mutex> lock(mutex_);
+      if (!freerdp_check_event_handles(context)) {
+        return;
+      }
     }
   }
 }
@@ -502,11 +503,17 @@ void RDPClient::pointerEvent(const Point& pos, int buttonMask) {
   bool right = buttonMask & 4;
   bool up = buttonMask & 8;
   bool down = buttonMask & 16;
+  bool leftWheel = buttonMask & 32;
+  bool rightWheel = buttonMask & 64;
   bool oldLeft = oldButtonMask & 1;
   bool oldMiddle = oldButtonMask & 2;
   bool oldRight = oldButtonMask & 4;
   bool oldUp = oldButtonMask & 8;
   bool oldDown = oldButtonMask & 16;
+  bool oldLeftWheel = oldButtonMask & 32;
+  bool oldRightWheel = oldButtonMask & 64;
+
+  // Down
   if (left && !oldLeft) {
     flags |= PTR_FLAGS_DOWN | PTR_FLAGS_BUTTON1;
   }
@@ -516,14 +523,10 @@ void RDPClient::pointerEvent(const Point& pos, int buttonMask) {
   if (middle && !oldMiddle) {
     flags |= PTR_FLAGS_DOWN | PTR_FLAGS_BUTTON3;
   }
-  if (up && !oldUp) {
-    flags |= PTR_FLAGS_HWHEEL | PTR_FLAGS_WHEEL;
-  }
-  if (down && !oldDown) {
-    flags |= PTR_FLAGS_HWHEEL | PTR_FLAGS_WHEEL_NEGATIVE;
-  }
   freerdp_input_send_mouse_event(context->input, flags, pos.x, pos.y);
-  flags = PTR_FLAGS_MOVE;
+
+  // Release
+  flags = 0;
   if (!left && oldLeft) {
     flags |= PTR_FLAGS_BUTTON1;
   }
@@ -533,14 +536,32 @@ void RDPClient::pointerEvent(const Point& pos, int buttonMask) {
   if (!middle && oldMiddle) {
     flags |= PTR_FLAGS_BUTTON3;
   }
-  if (!up && oldUp) {
-    flags |= PTR_FLAGS_WHEEL;
-  }
-  if (!down && oldDown) {
-    flags |= PTR_FLAGS_WHEEL_NEGATIVE;
-  }
-  if (flags != PTR_FLAGS_MOVE) {
+  if (flags != 0) {
     freerdp_input_send_mouse_event(context->input, flags, pos.x, pos.y);
+  }
+
+  // Vertical wheel
+  flags = 0;
+  if (up && !oldUp) {
+    flags = PTR_FLAGS_WHEEL | (WheelRotationMask & 1);
+  }
+  if (down && !oldDown) {
+    flags = PTR_FLAGS_WHEEL | PTR_FLAGS_WHEEL_NEGATIVE | (WheelRotationMask & (-1));
+  }
+  if (flags != 0) {
+    freerdp_input_send_mouse_event(context->input, flags, 0, 0);
+  }
+
+  // Horizontal wheel
+  flags = 0;
+  if (leftWheel && !oldLeftWheel) {
+    flags = PTR_FLAGS_HWHEEL | (WheelRotationMask & 1);
+  }
+  if (rightWheel && !oldRightWheel) {
+    flags = PTR_FLAGS_HWHEEL | PTR_FLAGS_WHEEL_NEGATIVE | (WheelRotationMask & (-1));
+  }
+  if (flags != 0) {
+    freerdp_input_send_mouse_event(context->input, flags, 0, 0);
   }
   oldButtonMask = buttonMask;
 }

@@ -31,7 +31,7 @@ using namespace rfb;
 RDPPixelBuffer::RDPPixelBuffer(const Rect &rect, RDPClient* client_)
   : FullFramePixelBuffer(), client(client_)
 {
-  format = PixelFormat(32, 24, false, true, 255, 255, 255, 0, 8, 16);
+  format = PixelFormat(32, 24, false, true, 255, 255, 255, 16, 8, 0);
   setBuffer(client->width(), client->height(), client->getBuffer(), client->width());
 }
 

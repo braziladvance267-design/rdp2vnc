@@ -52,6 +52,7 @@ public:
   virtual void clientCutText(const char* str);
   virtual unsigned int setScreenLayout(int fb_width, int fb_height,
                                        const rfb::ScreenSet& layout);
+  virtual void handleClipboardData(const char* data);
 protected:
   friend class RDPClient;
   Geometry* geometry;

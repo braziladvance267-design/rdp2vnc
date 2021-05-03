@@ -121,6 +121,10 @@ unsigned int RDPDesktop::setScreenLayout(int fb_width, int fb_height,
   return rfb::resultProhibited;
 }
 
+void RDPDesktop::handleClipboardData(const char* data) {
+
+}
+
 bool RDPDesktop::setFirstCursor(std::unique_ptr<RDPCursor> &cursor)
 {
   firstCursor = std::move(cursor);
