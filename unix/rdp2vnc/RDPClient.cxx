@@ -33,6 +33,7 @@
 #include <freerdp/freerdp.h>
 #include <freerdp/constants.h>
 #include <freerdp/gdi/gdi.h>
+#include <freerdp/gdi/gfx.h>
 #include <freerdp/utils/signal.h>
 
 #include <freerdp/client/file.h>
@@ -208,6 +209,82 @@ BOOL RDPClient::rdpPlaySound(rdpContext* context, const PLAY_SOUND_UPDATE* playS
   return ctx->client->playSound(playSound);
 }
 
+void RDPClient::rdpChannelConnected(void* context, ChannelConnectedEventArgs* e) {
+  if (!context) {
+    return;
+  }
+  RDPContext* ctx = (RDPContext *)context;
+  ctx->client->channelConnected(e);
+}
+
+void RDPClient::rdpChannelDisconnected(void* context, ChannelDisconnectedEventArgs* e) {
+  if (!context) {
+    return;
+  }
+  RDPContext* ctx = (RDPContext *)context;
+  ctx->client->channelDisconnected(e);
+}
+
+UINT RDPClient::rdpCliprdrMonitorReady(CliprdrClientContext* context,
+  const CLIPRDR_MONITOR_READY* monitorReady)
+{
+  if (!context) {
+    return CHANNEL_RC_OK;
+  }
+  RDPClient* client = (RDPClient *)context->custom;
+  return client->cliprdrMonitorReady(monitorReady);
+}
+
+UINT RDPClient::rdpCliprdrServerCapabilities(CliprdrClientContext* context,
+  const CLIPRDR_CAPABILITIES* capabilities)
+{
+  if (!context) {
+    return CHANNEL_RC_OK;
+  }
+  RDPClient* client = (RDPClient *)context->custom;
+  return client->cliprdrServerCapabilities(capabilities);
+}
+
+UINT RDPClient::rdpCliprdrServerFormatList(CliprdrClientContext* context,
+  const CLIPRDR_FORMAT_LIST* formatList)
+{
+  if (!context) {
+    return CHANNEL_RC_OK;
+  }
+  RDPClient* client = (RDPClient *)context->custom;
+  return client->cliprdrServerFormatList(formatList);
+}
+
+UINT RDPClient::rdpCliprdrServerFormatListResponse(CliprdrClientContext* context,
+  const CLIPRDR_FORMAT_LIST_RESPONSE* formatListResponse)
+{
+  if (!context) {
+    return CHANNEL_RC_OK;
+  }
+  RDPClient* client = (RDPClient *)context->custom;
+  return client->cliprdrServerFormatListResponse(formatListResponse);
+}
+
+UINT RDPClient::rdpCliprdrServerFormatDataRequest(CliprdrClientContext* context,
+  const CLIPRDR_FORMAT_DATA_REQUEST* formatDataRequest)
+{
+  if (!context) {
+    return CHANNEL_RC_OK;
+  }
+  RDPClient* client = (RDPClient *)context->custom;
+  return client->cliprdrServerFormatDataRequest(formatDataRequest);
+}
+
+UINT RDPClient::rdpCliprdrServerFormatDataResponse(CliprdrClientContext* context,
+  const CLIPRDR_FORMAT_DATA_RESPONSE* formatDataResponse)
+{
+  if (!context) {
+    return CHANNEL_RC_OK;
+  }
+  RDPClient* client = (RDPClient *)context->custom;
+  return client->cliprdrServerFormatDataResponse(formatDataResponse);
+}
+
 bool RDPClient::beginPaint() {
   return true;
 }
@@ -241,6 +318,8 @@ bool RDPClient::endPaint() {
 bool RDPClient::preConnect() {
   //rdpSettings* settings;
   //settings = instance->settings;
+  PubSub_SubscribeChannelConnected(instance->context->pubSub, rdpChannelConnected);
+  PubSub_SubscribeChannelDisconnected(instance->context->pubSub, rdpChannelDisconnected);
   if (!freerdp_client_load_addins(instance->context->channels, instance->settings)) {
     return false;
   }
@@ -320,9 +399,125 @@ bool RDPClient::playSound(const PLAY_SOUND_UPDATE* playSound) {
   return true;
 }
 
+void RDPClient::channelConnected(ChannelConnectedEventArgs* e) {
+  if (strcmp(e->name, RDPGFX_DVC_CHANNEL_NAME) == 0) {
+    gdi_graphics_pipeline_init(context->gdi, (RdpgfxClientContext *)e->pInterface);
+  } else if (strcmp(e->name, CLIPRDR_SVC_CHANNEL_NAME) == 0) {
+    cliprdrContext = (CliprdrClientContext *)e->pInterface;
+    cliprdrContext->custom = (void *)this;
+    cliprdrContext->MonitorReady = rdpCliprdrMonitorReady;
+    cliprdrContext->ServerCapabilities = rdpCliprdrServerCapabilities;
+    cliprdrContext->ServerFormatList = rdpCliprdrServerFormatList;
+    cliprdrContext->ServerFormatListResponse = rdpCliprdrServerFormatListResponse;
+    cliprdrContext->ServerFormatDataRequest = rdpCliprdrServerFormatDataRequest;
+    cliprdrContext->ServerFormatDataResponse = rdpCliprdrServerFormatDataResponse;
+  }
+}
+
+void RDPClient::channelDisconnected(ChannelDisconnectedEventArgs* e) {
+  if (strcmp(e->name, RDPGFX_DVC_CHANNEL_NAME) == 0) {
+    gdi_graphics_pipeline_uninit(context->gdi, (RdpgfxClientContext *)e->pInterface);
+  } else if (strcmp(e->name, CLIPRDR_SVC_CHANNEL_NAME) == 0) {
+  }
+}
+
+UINT RDPClient::cliprdrMonitorReady(const CLIPRDR_MONITOR_READY* monitorReady) {
+  UINT res;
+
+  CLIPRDR_CAPABILITIES capabilities;
+  CLIPRDR_GENERAL_CAPABILITY_SET generalCapabilitySet;
+  capabilities.cCapabilitiesSets = 1;
+  capabilities.capabilitySets = (CLIPRDR_CAPABILITY_SET *)&generalCapabilitySet;
+  generalCapabilitySet.capabilitySetType = CB_CAPSTYPE_GENERAL;
+  generalCapabilitySet.capabilitySetLength = 12;
+  generalCapabilitySet.version = CB_CAPS_VERSION_2;
+  generalCapabilitySet.generalFlags = CB_USE_LONG_FORMAT_NAMES;
+  if ((res = cliprdrContext->ClientCapabilities(cliprdrContext, &capabilities)) != CHANNEL_RC_OK) {
+    return res;
+  }
+
+  if ((res = cliprdrSendClientFormatList()) != CHANNEL_RC_OK) {
+    return res;
+  }
+  return CHANNEL_RC_OK;
+}
+
+UINT RDPClient::cliprdrServerCapabilities(const CLIPRDR_CAPABILITIES* capabilities) {
+  return CHANNEL_RC_OK;
+}
+
+UINT RDPClient::cliprdrServerFormatList(const CLIPRDR_FORMAT_LIST* formatList) {
+  cerr << "server format list\n";
+  if (desktop && desktop->server) {
+    desktop->server->announceClipboard(true);
+  }
+  CLIPRDR_FORMAT_LIST_RESPONSE formatListResponse;
+  formatListResponse.msgType = CB_FORMAT_LIST_RESPONSE;
+  formatListResponse.msgFlags = CB_RESPONSE_OK;
+  formatListResponse.dataLen = 0;
+  return cliprdrContext->ClientFormatListResponse(cliprdrContext, &formatListResponse);
+}
+
+UINT RDPClient::cliprdrServerFormatListResponse(const CLIPRDR_FORMAT_LIST_RESPONSE* formatListResponse) {
+  return CHANNEL_RC_OK;
+}
+
+UINT RDPClient::cliprdrServerFormatDataRequest(const CLIPRDR_FORMAT_DATA_REQUEST* formatDataRequest) {
+  cliprdrRequestedFormatId = formatDataRequest->requestedFormatId;
+  if (cliprdrRequestedFormatId != CF_RAW && cliprdrRequestedFormatId != CF_UNICODETEXT) {
+    return cliprdrSendDataResponse(NULL, 0);
+  }
+  if (desktop && desktop->server) {
+    desktop->server->requestClipboard();
+  }
+  return CHANNEL_RC_OK;
+}
+
+UINT RDPClient::cliprdrServerFormatDataResponse(const CLIPRDR_FORMAT_DATA_RESPONSE* formatDataResponse) {
+  cerr << formatDataResponse->requestedFormatData << endl;
+  return CHANNEL_RC_OK;
+}
+
+UINT RDPClient::cliprdrSendDataResponse(const uint8_t* data, size_t size) {
+  CLIPRDR_FORMAT_DATA_RESPONSE response = {0};
+  if (cliprdrRequestedFormatId < 0) {
+    return CHANNEL_RC_OK;
+  }
+  cliprdrRequestedFormatId = -1;
+  response.msgFlags = data ? CB_RESPONSE_OK : CB_RESPONSE_FAIL;
+  response.dataLen = size;
+  response.requestedFormatData = data;
+  return cliprdrContext->ClientFormatDataResponse(cliprdrContext, &response);
+}
+
+UINT RDPClient::cliprdrSendClientFormatList() {
+  const int numFormats = 2;
+  CLIPRDR_FORMAT formats[numFormats];
+  memset(formats, 0, numFormats * sizeof(CLIPRDR_FORMAT));
+  formats[0].formatId = CF_RAW;
+  formats[1].formatId = CF_UNICODETEXT;
+  //formats[2].formatId = CF_TEXT;
+  return cliprdrSendFormatList(formats, numFormats);
+}
+
+UINT RDPClient::cliprdrSendFormatList(const CLIPRDR_FORMAT* formats, int numFormats) {
+  CLIPRDR_FORMAT_LIST formatList = {0};
+  formatList.msgFlags = CB_RESPONSE_OK;
+  formatList.numFormats = numFormats;
+  formatList.formats = (CLIPRDR_FORMAT *)formats;
+  formatList.msgType = CB_FORMAT_LIST;
+
+  if (!hasSentCliprdrFormats) {
+    cliprdrSendDataResponse(NULL, 0);
+    return cliprdrContext->ClientFormatList(cliprdrContext, &formatList);
+  }
+  return CHANNEL_RC_OK;
+}
+
 RDPClient::RDPClient(int argc_, char** argv_)
-  : argc(argc_), argv(argv_), context(NULL),
-    instance(NULL), desktop(NULL), hasConnected(false), oldButtonMask(0)
+  : argc(argc_), argv(argv_), context(NULL), cliprdrContext(NULL), cliprdrRequestedFormatId(-1),
+    instance(NULL), desktop(NULL), hasConnected(false), hasSentCliprdrFormats(false), oldButtonMask(0),
+    hasCapsLocked(false), hasSyncedCapsLocked(false)
 {
 }
 
@@ -463,7 +658,8 @@ void RDPClient::eventLoop() {
     }
     if (WaitForMultipleObjects(numHandles, handles, FALSE, 10000) == WAIT_FAILED) {
       return;
-    }{
+    }
+    {
       lock_guard<mutex> lock(mutex_);
       if (!freerdp_check_event_handles(context)) {
         return;
@@ -497,7 +693,7 @@ rdr::U8* RDPClient::getBuffer() {
 }
 
 void RDPClient::pointerEvent(const Point& pos, int buttonMask) {
-  uint16_t flags = PTR_FLAGS_MOVE;
+  uint16_t flags = 0;
   bool left = buttonMask & 1;
   bool middle = buttonMask & 2;
   bool right = buttonMask & 4;
@@ -513,7 +709,7 @@ void RDPClient::pointerEvent(const Point& pos, int buttonMask) {
   bool oldLeftWheel = oldButtonMask & 32;
   bool oldRightWheel = oldButtonMask & 64;
 
-  // Down
+  // Down and move
   if (left && !oldLeft) {
     flags |= PTR_FLAGS_DOWN | PTR_FLAGS_BUTTON1;
   }
@@ -522,6 +718,9 @@ void RDPClient::pointerEvent(const Point& pos, int buttonMask) {
   }
   if (middle && !oldMiddle) {
     flags |= PTR_FLAGS_DOWN | PTR_FLAGS_BUTTON3;
+  }
+  if (flags == 0) {
+    flags = PTR_FLAGS_MOVE;
   }
   freerdp_input_send_mouse_event(context->input, flags, pos.x, pos.y);
 
@@ -543,10 +742,10 @@ void RDPClient::pointerEvent(const Point& pos, int buttonMask) {
   // Vertical wheel
   flags = 0;
   if (up && !oldUp) {
-    flags = PTR_FLAGS_WHEEL | (WheelRotationMask & 1);
+    flags = PTR_FLAGS_WHEEL | (WheelRotationMask & 127);
   }
   if (down && !oldDown) {
-    flags = PTR_FLAGS_WHEEL | PTR_FLAGS_WHEEL_NEGATIVE | (WheelRotationMask & (-1));
+    flags = PTR_FLAGS_WHEEL | PTR_FLAGS_WHEEL_NEGATIVE | (WheelRotationMask & (-127));
   }
   if (flags != 0) {
     freerdp_input_send_mouse_event(context->input, flags, 0, 0);
@@ -555,10 +754,10 @@ void RDPClient::pointerEvent(const Point& pos, int buttonMask) {
   // Horizontal wheel
   flags = 0;
   if (leftWheel && !oldLeftWheel) {
-    flags = PTR_FLAGS_HWHEEL | (WheelRotationMask & 1);
+    flags = PTR_FLAGS_HWHEEL | (WheelRotationMask & 127);
   }
   if (rightWheel && !oldRightWheel) {
-    flags = PTR_FLAGS_HWHEEL | PTR_FLAGS_WHEEL_NEGATIVE | (WheelRotationMask & (-1));
+    flags = PTR_FLAGS_HWHEEL | PTR_FLAGS_WHEEL_NEGATIVE | (WheelRotationMask & (-127));
   }
   if (flags != 0) {
     freerdp_input_send_mouse_event(context->input, flags, 0, 0);
@@ -567,16 +766,74 @@ void RDPClient::pointerEvent(const Point& pos, int buttonMask) {
 }
 
 void RDPClient::keyEvent(rdr::U32 keysym, rdr::U32 xtcode, bool down) {
-  uint16_t flags = down ? KBD_FLAGS_DOWN : KBD_FLAGS_RELEASE;
-
-  auto it = keysymScancodeMap.find(keysym);
-  if (it != keysymScancodeMap.end()) {
-    uint32_t rdpCode = it->second;
-    freerdp_input_send_keyboard_event_ex(context->input, down, rdpCode);
+  if (down) {
+    pressedKeys.insert(keysym);
   } else {
+    pressedKeys.erase(keysym);
+  }
+  if (xtcode) {
+    // Simple case
+    bool pressedShift = pressedKeys.count(XKB_KEY_Shift_L) || pressedKeys.count(XKB_KEY_Shift_R);
+    bool isUppercase = keysym >= 'A' && keysym <= 'Z';
+    bool isLowercase = keysym >= 'a' && keysym <= 'z';
+    bool newCapsLocked = hasCapsLocked;
+    if ((isUppercase && !pressedShift) || (isLowercase && pressedShift)) {
+      // The client sent a uppercase letter without pressing shift
+      // or a lowercase letter with pressing shift,
+      // which means the CapsLock is enabled
+      newCapsLocked = true;
+    } else if ((isUppercase && pressedShift) || (isLowercase && !pressedShift)) {
+      newCapsLocked = false;
+    }
+    if (hasCapsLocked != newCapsLocked) {
+      if (!hasSyncedCapsLocked) {
+        // Only synchorinize CapsLock when we switch it for the first time
+        freerdp_input_send_synchronize_event(context->input, newCapsLocked ? KBD_SYNC_CAPS_LOCK : 0);
+      } else {
+        freerdp_input_send_keyboard_event_ex(context->input, true, RDP_SCANCODE_CAPSLOCK);
+        freerdp_input_send_keyboard_pause_event(context->input);
+        freerdp_input_send_keyboard_event_ex(context->input, false, RDP_SCANCODE_CAPSLOCK);
+      }
+    }
+    hasCapsLocked = newCapsLocked;
+    freerdp_input_send_keyboard_event_ex(context->input, down, xtcode);
+  } else {
+    // Advanced case
+    auto it = keysymScancodeMap.find(keysym);
+    if (it != keysymScancodeMap.end()) {
+      uint32_t rdpCode = it->second;
+      freerdp_input_send_keyboard_event_ex(context->input, down, rdpCode);
+      return;
+    }
+    if (down && keysym >= 'A' && keysym <= 'Z') {
+      if (pressedKeys.count(XKB_KEY_Control_L) ||
+          pressedKeys.count(XKB_KEY_Control_R) ||
+          pressedKeys.count(XKB_KEY_Alt_L) ||
+          pressedKeys.count(XKB_KEY_Alt_R)) {
+        combinedKeys.insert(keysym);
+        auto it = keysymScancodeMap.find(keysym - 'A' + 'a');
+        if (it != keysymScancodeMap.end()) {
+          freerdp_input_send_keyboard_event_ex(context->input, down, it->second);
+        }
+        return;
+      }
+    }
+    if (!down && keysym >= 'A' && keysym <= 'Z' && combinedKeys.count(keysym)) {
+      auto it = keysymScancodeMap.find(keysym - 'A' + 'a');
+      if (it != keysymScancodeMap.end()) {
+        freerdp_input_send_keyboard_event_ex(context->input, down, it->second);
+      }
+      combinedKeys.erase(keysym);
+      return;
+    }
+    uint16_t flags = down ? KBD_FLAGS_DOWN : KBD_FLAGS_RELEASE;
     uint32_t keyUTF32 = xkb_keysym_to_utf32(keysym);
     freerdp_input_send_unicode_keyboard_event(context->input, flags, keyUTF32);
   }
+}
+
+void RDPClient::handleClipboardData(const char* data) {
+  cliprdrSendDataResponse((const uint8_t *)data, strlen(data) + 1);
 }
 
 std::mutex &RDPClient::getMutex() {

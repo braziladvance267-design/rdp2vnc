@@ -122,7 +122,7 @@ unsigned int RDPDesktop::setScreenLayout(int fb_width, int fb_height,
 }
 
 void RDPDesktop::handleClipboardData(const char* data) {
-
+  client->handleClipboardData(data);
 }
 
 bool RDPDesktop::setFirstCursor(std::unique_ptr<RDPCursor> &cursor)

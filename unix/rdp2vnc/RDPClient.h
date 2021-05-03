@@ -26,6 +26,7 @@
 #include <memory>
 #include <mutex>
 #include <thread>
+#include <unordered_set>
 #include <inttypes.h>
 #include <unistd.h>
 
@@ -64,6 +65,7 @@ public:
   rdr::U8* getBuffer();
   void pointerEvent(const rfb::Point& pos, int buttonMask);
   void keyEvent(rdr::U32 keysym, rdr::U32 xtcode, bool down);
+  void handleClipboardData(const char* data);
   std::mutex &getMutex();
 private:
   friend class RDPDesktop;
@@ -79,6 +81,14 @@ private:
   static BOOL rdpPointerSetPosition(rdpContext* context, UINT32 x, UINT32 y);
   static BOOL rdpDesktopResize(rdpContext* context);
   static BOOL rdpPlaySound(rdpContext* context, const PLAY_SOUND_UPDATE* playSound);
+  static void rdpChannelConnected(void* context, ChannelConnectedEventArgs* e);
+  static void rdpChannelDisconnected(void* context, ChannelDisconnectedEventArgs* e);
+  static UINT rdpCliprdrMonitorReady(CliprdrClientContext* context, const CLIPRDR_MONITOR_READY* monitorReady);
+  static UINT rdpCliprdrServerCapabilities(CliprdrClientContext* context, const CLIPRDR_CAPABILITIES* capabilities);
+  static UINT rdpCliprdrServerFormatList(CliprdrClientContext* context, const CLIPRDR_FORMAT_LIST* formatList);
+  static UINT rdpCliprdrServerFormatListResponse(CliprdrClientContext* context, const CLIPRDR_FORMAT_LIST_RESPONSE* formatListResponse);
+  static UINT rdpCliprdrServerFormatDataRequest(CliprdrClientContext* context, const CLIPRDR_FORMAT_DATA_REQUEST* formatDataRequest);
+  static UINT rdpCliprdrServerFormatDataResponse(CliprdrClientContext* context, const CLIPRDR_FORMAT_DATA_RESPONSE* formatDataResponse);
   bool beginPaint();
   bool endPaint();
   bool preConnect();
@@ -88,18 +98,37 @@ private:
   bool pointerSetPosition(uint32_t x, uint32_t y);
   bool desktopResize();
   bool playSound(const PLAY_SOUND_UPDATE* playSound);
+  UINT cliprdrMonitorReady(const CLIPRDR_MONITOR_READY* monitorReady);
+  UINT cliprdrServerCapabilities(const CLIPRDR_CAPABILITIES* capabilities);
+  UINT cliprdrServerFormatList(const CLIPRDR_FORMAT_LIST* formatList);
+  UINT cliprdrServerFormatListResponse(const CLIPRDR_FORMAT_LIST_RESPONSE* formatListResponse);
+  UINT cliprdrServerFormatDataRequest(const CLIPRDR_FORMAT_DATA_REQUEST* formatDataRequest);
+  UINT cliprdrServerFormatDataResponse(const CLIPRDR_FORMAT_DATA_RESPONSE* formatDataResponse);
+  UINT cliprdrSendClientFormatList();
+  UINT cliprdrSendFormatList(const CLIPRDR_FORMAT* formats, int numFormats);
+  UINT cliprdrSendDataResponse(const uint8_t* data, size_t size);
+
+  void channelConnected(ChannelConnectedEventArgs* e);
+  void channelDisconnected(ChannelDisconnectedEventArgs* e);
   void eventLoop();
 
   int argc;
   char** argv;
   rdpContext* context;
   freerdp* instance;
-  RDPDesktop *desktop;
+  RDPDesktop* desktop;
+  CliprdrClientContext* cliprdrContext;
   bool hasConnected;
+  bool hasSentCliprdrFormats;
   int oldButtonMask;
+  uint32_t cliprdrRequestedFormatId;
   std::unique_ptr<std::thread> thread_;
   std::unique_ptr<RDPCursor> firstCursor;
   std::mutex mutex_;
+  std::unordered_set<uint32_t> pressedKeys;
+  std::unordered_set<uint32_t> combinedKeys;
+  bool hasCapsLocked;
+  bool hasSyncedCapsLocked;
 };
 
 #endif // __RDPCLIENT_H__
