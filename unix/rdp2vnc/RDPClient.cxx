@@ -24,6 +24,7 @@
 #include <vector>
 #include <memory>
 #include <thread>
+#include <string>
 #include <unordered_map>
 #include <inttypes.h>
 #include <stdio.h>
@@ -46,6 +47,7 @@
 #include <winpr/synch.h>
 
 #include <xkbcommon/xkbcommon.h>
+#include <utf8cpp/utf8.h>
 
 #include <rfb/PixelFormat.h>
 #include <rfb/Rect.h>
@@ -307,7 +309,11 @@ bool RDPClient::endPaint() {
     int w = cinvalid[i].w;
     int h = cinvalid[i].h;
     if (desktop && desktop->server) {
-      desktop->server->add_changed(Region(Rect(x, y, x + w, y + h)));
+      try {
+        desktop->server->add_changed(Region(Rect(x, y, x + w, y + h)));
+      } catch (rdr::Exception& e) {
+        vlog.error("Add changed: %s", e.str());
+      }
     }
   }
   gdi->primary->hdc->hwnd->invalid->null = TRUE;
@@ -363,7 +369,11 @@ bool RDPClient::pointerSet(RDPPointerImpl* pointer) {
   int y = pointer->y;
   Point hotspot(x, y);
   if (desktop && desktop->server) {
-    desktop->server->setCursor(width, height, hotspot, pointer->buffer);
+    try {
+      desktop->server->setCursor(width, height, hotspot, pointer->buffer);
+    } catch (rdr::Exception& e) {
+      vlog.error("Set cursor: %s", e.str());
+    }
   } else {
     firstCursor.reset(new RDPCursor(pointer->buffer, pointer->size, width, height, x, y));
   }
@@ -372,7 +382,11 @@ bool RDPClient::pointerSet(RDPPointerImpl* pointer) {
 
 bool RDPClient::pointerSetPosition(uint32_t x, uint32_t y) {
   if (desktop && desktop->server) {
-    desktop->server->setCursorPos(Point(x, y), false);
+    try {
+      desktop->server->setCursorPos(Point(x, y), false);
+    } catch (rdr::Exception& e) {
+      vlog.error("Set cursor position: %s", e.str());
+    }
   } else {
     if (firstCursor) {
       firstCursor->posX = x;
@@ -394,7 +408,11 @@ bool RDPClient::desktopResize() {
 
 bool RDPClient::playSound(const PLAY_SOUND_UPDATE* playSound) {
   if (desktop && desktop->server) {
-    desktop->server->bell();
+    try {
+      desktop->server->bell();
+    } catch (rdr::Exception& e) {
+      vlog.error("Bell: %s", e.str());
+    }
   }
   return true;
 }
@@ -422,6 +440,7 @@ void RDPClient::channelDisconnected(ChannelDisconnectedEventArgs* e) {
 }
 
 UINT RDPClient::cliprdrMonitorReady(const CLIPRDR_MONITOR_READY* monitorReady) {
+  lock_guard<mutex> lock(mutexCliprdr);
   UINT res;
 
   CLIPRDR_CAPABILITIES capabilities;
@@ -447,15 +466,23 @@ UINT RDPClient::cliprdrServerCapabilities(const CLIPRDR_CAPABILITIES* capabiliti
 }
 
 UINT RDPClient::cliprdrServerFormatList(const CLIPRDR_FORMAT_LIST* formatList) {
-  cerr << "server format list\n";
   if (desktop && desktop->server) {
-    desktop->server->announceClipboard(true);
+    scoped_lock lock(mutexVNC, mutexCliprdr);
+    try {
+      desktop->server->announceClipboard(true);
+    } catch (rdr::Exception& e) {
+      vlog.error("Announce clipboard: %s", e.str());
+    }
+    hasAnnouncedClipboard = true;
   }
   CLIPRDR_FORMAT_LIST_RESPONSE formatListResponse;
   formatListResponse.msgType = CB_FORMAT_LIST_RESPONSE;
   formatListResponse.msgFlags = CB_RESPONSE_OK;
   formatListResponse.dataLen = 0;
-  return cliprdrContext->ClientFormatListResponse(cliprdrContext, &formatListResponse);
+  {
+    lock_guard lock(mutexCliprdr);
+    return cliprdrContext->ClientFormatListResponse(cliprdrContext, &formatListResponse);
+  }
 }
 
 UINT RDPClient::cliprdrServerFormatListResponse(const CLIPRDR_FORMAT_LIST_RESPONSE* formatListResponse) {
@@ -463,26 +490,65 @@ UINT RDPClient::cliprdrServerFormatListResponse(const CLIPRDR_FORMAT_LIST_RESPON
 }
 
 UINT RDPClient::cliprdrServerFormatDataRequest(const CLIPRDR_FORMAT_DATA_REQUEST* formatDataRequest) {
-  cliprdrRequestedFormatId = formatDataRequest->requestedFormatId;
-  if (cliprdrRequestedFormatId != CF_RAW && cliprdrRequestedFormatId != CF_UNICODETEXT) {
-    return cliprdrSendDataResponse(NULL, 0);
+  {
+    lock_guard lock(mutexCliprdr);
+    cliprdrRequestedFormatId = formatDataRequest->requestedFormatId;
+    if (cliprdrRequestedFormatId != CF_RAW && cliprdrRequestedFormatId != CF_UNICODETEXT) {
+      return cliprdrSendDataResponse(NULL, 0);
+    }
+    if (!isClientClipboardAvailable) {
+      return cliprdrSendDataResponse(NULL, 0);
+    }
   }
   if (desktop && desktop->server) {
-    desktop->server->requestClipboard();
+    lock_guard<mutex> lock(mutexVNC);
+    try {
+      desktop->server->requestClipboard();
+    } catch (rdr::Exception& e) {
+      vlog.error("Request clipboard: %s", e.str());
+    }
   }
   return CHANNEL_RC_OK;
 }
 
 UINT RDPClient::cliprdrServerFormatDataResponse(const CLIPRDR_FORMAT_DATA_RESPONSE* formatDataResponse) {
-  cerr << formatDataResponse->requestedFormatData << endl;
+  string clipData;
+  {
+    lock_guard<mutex> lock(mutexCliprdr);
+    if (formatDataResponse->msgFlags == CB_RESPONSE_FAIL) {
+      return CHANNEL_RC_OK;
+    }
+    if (!hasClientRequestedClipboard) {
+      return CHANNEL_RC_OK;
+    }
+    const uint8_t* data = formatDataResponse->requestedFormatData;
+    uint32_t size = formatDataResponse->dataLen;
+    u16string utf16Data((char16_t *)data, size / 2);
+    string utf8Data = utf8::utf16to8(utf16Data);
+    clipData.reserve(utf8Data.length());
+    for (char c : utf8Data) {
+      if (c != '\r') {
+        clipData += c;
+      }
+    }
+    hasClientRequestedClipboard = false;
+  }
+  if (desktop && desktop->server) {
+    lock_guard<mutex> lock(mutexVNC);
+    try {
+      desktop->server->sendClipboardData(clipData.c_str());
+    } catch (rdr::Exception& e) {
+      vlog.error("Send clipboard data: %s", e.str());
+    }
+  }
   return CHANNEL_RC_OK;
 }
 
 UINT RDPClient::cliprdrSendDataResponse(const uint8_t* data, size_t size) {
-  CLIPRDR_FORMAT_DATA_RESPONSE response = {0};
   if (cliprdrRequestedFormatId < 0) {
     return CHANNEL_RC_OK;
   }
+  CLIPRDR_FORMAT_DATA_RESPONSE response = {0};
   cliprdrRequestedFormatId = -1;
   response.msgFlags = data ? CB_RESPONSE_OK : CB_RESPONSE_FAIL;
   response.dataLen = size;
@@ -509,15 +575,18 @@ UINT RDPClient::cliprdrSendFormatList(const CLIPRDR_FORMAT* formats, int numForm
 
   if (!hasSentCliprdrFormats) {
     cliprdrSendDataResponse(NULL, 0);
+    hasSentCliprdrFormats = true;
     return cliprdrContext->ClientFormatList(cliprdrContext, &formatList);
   }
   return CHANNEL_RC_OK;
 }
 
 RDPClient::RDPClient(int argc_, char** argv_)
-  : argc(argc_), argv(argv_), context(NULL), cliprdrContext(NULL), cliprdrRequestedFormatId(-1),
-    instance(NULL), desktop(NULL), hasConnected(false), hasSentCliprdrFormats(false), oldButtonMask(0),
-    hasCapsLocked(false), hasSyncedCapsLocked(false)
+  : argc(argc_), argv(argv_), context(NULL), instance(NULL), desktop(NULL),
+    cliprdrContext(NULL), hasConnected(false), hasSentCliprdrFormats(false),
+    oldButtonMask(0), cliprdrRequestedFormatId(-1), hasCapsLocked(false),
+    hasSyncedCapsLocked(false), hasAnnouncedClipboard(false),
+    isClientClipboardAvailable(false), hasClientRequestedClipboard(false)
 {
 }
 
@@ -650,7 +719,7 @@ void RDPClient::eventLoop() {
   DWORD numHandles;
   while (!freerdp_shall_disconnect(instance)) {
     {
-      lock_guard<mutex> lock(mutex_);
+      lock_guard<mutex> lock(mutexVNC);
       numHandles = freerdp_get_event_handles(context, handles, 64);
     }
     if (numHandles == 0) {
@@ -660,7 +729,7 @@ void RDPClient::eventLoop() {
       return;
     }
     {
-      lock_guard<mutex> lock(mutex_);
+      lock_guard<mutex> lock(mutexVNC);
       if (!freerdp_check_event_handles(context)) {
         return;
       }
@@ -789,6 +858,7 @@ void RDPClient::keyEvent(rdr::U32 keysym, rdr::U32 xtcode, bool down) {
       if (!hasSyncedCapsLocked) {
         // Only synchorinize CapsLock when we switch it for the first time
         freerdp_input_send_synchronize_event(context->input, newCapsLocked ? KBD_SYNC_CAPS_LOCK : 0);
+        hasSyncedCapsLocked = true;
       } else {
         freerdp_input_send_keyboard_event_ex(context->input, true, RDP_SCANCODE_CAPSLOCK);
         freerdp_input_send_keyboard_pause_event(context->input);
@@ -832,10 +902,44 @@ void RDPClient::keyEvent(rdr::U32 keysym, rdr::U32 xtcode, bool down) {
   }
 }
 
+void RDPClient::handleClipboardRequest() {
+  if (!cliprdrContext || !hasAnnouncedClipboard) {
+    return;
+  }
+  lock_guard<mutex> lock(mutexCliprdr);
+  CLIPRDR_FORMAT_DATA_REQUEST request = {0};
+  request.requestedFormatId = CF_UNICODETEXT;
+  cliprdrContext->ClientFormatDataRequest(cliprdrContext, &request);
+  hasAnnouncedClipboard = false;
+  hasClientRequestedClipboard = true;
+}
+
+void RDPClient::handleClipboardAnnounce(bool available) {
+  if (!cliprdrContext) {
+    return;
+  }
+  lock_guard<mutex> lock(mutexCliprdr);
+  isClientClipboardAvailable = available;
+  if (!available && cliprdrRequestedFormatId >= 0) {
+    cliprdrSendDataResponse(NULL, 0);
+    return;
+  }
+  if (available) {
+    cliprdrSendClientFormatList();
+  }
+}
+
 void RDPClient::handleClipboardData(const char* data) {
-  cliprdrSendDataResponse((const uint8_t *)data, strlen(data) + 1);
+  if (!cliprdrContext) {
+    return;
+  }
+  lock_guard<mutex> lock(mutexCliprdr);
+  string utf8Data(data);
+  u16string utf16Data = utf8::utf8to16(utf8Data);
+  hasSentCliprdrFormats = false;
+  cliprdrSendDataResponse((const uint8_t *)utf16Data.c_str(), utf16Data.length() * 2 + 2);
 }
 
 std::mutex &RDPClient::getMutex() {
-  return mutex_;
+  return mutexVNC;
 }

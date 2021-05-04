@@ -65,6 +65,8 @@ public:
   rdr::U8* getBuffer();
   void pointerEvent(const rfb::Point& pos, int buttonMask);
   void keyEvent(rdr::U32 keysym, rdr::U32 xtcode, bool down);
+  void handleClipboardRequest();
+  void handleClipboardAnnounce(bool available);
   void handleClipboardData(const char* data);
   std::mutex &getMutex();
 private:
@@ -124,11 +126,15 @@ private:
   uint32_t cliprdrRequestedFormatId;
   std::unique_ptr<std::thread> thread_;
   std::unique_ptr<RDPCursor> firstCursor;
-  std::mutex mutex_;
+  std::mutex mutexVNC;
+  std::mutex mutexCliprdr;
   std::unordered_set<uint32_t> pressedKeys;
   std::unordered_set<uint32_t> combinedKeys;
   bool hasCapsLocked;
   bool hasSyncedCapsLocked;
+  bool hasAnnouncedClipboard;
+  bool isClientClipboardAvailable;
+  bool hasClientRequestedClipboard;
 };
 
 #endif // __RDPCLIENT_H__

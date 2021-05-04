@@ -60,10 +60,18 @@ void RDPDesktop::start(VNCServer* vs) {
   //server->setLEDState(ledState);
 
   if (firstCursor) {
-    server->setCursor(firstCursor->width, firstCursor->height,
-      Point(firstCursor->x, firstCursor->y), firstCursor->data);
+    try {
+      server->setCursor(firstCursor->width, firstCursor->height,
+        Point(firstCursor->x, firstCursor->y), firstCursor->data);
+    } catch (rdr::Exception& e) {
+      vlog.error("Set cursor: %s", e.str());
+    }
     if (firstCursor->posX >= 0 && firstCursor->posY >= 0) {
-      server->setCursorPos(Point(firstCursor->posX, firstCursor->posY), false);
+      try {
+        server->setCursorPos(Point(firstCursor->posX, firstCursor->posY), false);
+      } catch (rdr::Exception& e) {
+        vlog.error("Set cursor position: %s", e.str());
+      }
     }
     firstCursor.reset(nullptr);
   }
@@ -119,6 +127,14 @@ unsigned int RDPDesktop::setScreenLayout(int fb_width, int fb_height,
                                          const rfb::ScreenSet& layout)
 {
   return rfb::resultProhibited;
+}
+
+void RDPDesktop::handleClipboardRequest() {
+  client->handleClipboardRequest();
+}
+
+void RDPDesktop::handleClipboardAnnounce(bool available) {
+  client->handleClipboardAnnounce(available);
 }
 
 void RDPDesktop::handleClipboardData(const char* data) {

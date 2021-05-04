@@ -53,6 +53,7 @@ public:
   virtual unsigned int setScreenLayout(int fb_width, int fb_height,
                                        const rfb::ScreenSet& layout);
   virtual void handleClipboardRequest();
+  virtual void handleClipboardAnnounce(bool available);
   virtual void handleClipboardData(const char* data);
 protected:
   friend class RDPClient;
