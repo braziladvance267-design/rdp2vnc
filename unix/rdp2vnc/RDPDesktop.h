@@ -66,9 +66,9 @@ protected:
   unsigned ledState;
   const unsigned short *codeMap;
   unsigned codeMapLen;
-  std::unique_ptr<RDPCursor> firstCursor;
+  std::shared_ptr<RDPCursor> firstCursor;
   rfb::ScreenSet computeScreenLayout();
-  bool setFirstCursor(std::unique_ptr<RDPCursor> &cursor);
+  bool setFirstCursor(std::shared_ptr<RDPCursor> &cursor);
   bool resize();
 };
 

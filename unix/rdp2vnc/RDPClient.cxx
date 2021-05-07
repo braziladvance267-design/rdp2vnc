@@ -26,10 +26,10 @@
 #include <thread>
 #include <string>
 #include <unordered_map>
-#include <inttypes.h>
-#include <stdio.h>
 #include <assert.h>
+#include <inttypes.h>
 #include <unistd.h>
+#include <sys/time.h>
 
 #include <freerdp/freerdp.h>
 #include <freerdp/constants.h>
@@ -40,6 +40,7 @@
 #include <freerdp/client/file.h>
 #include <freerdp/client/cmdline.h>
 #include <freerdp/client/cliprdr.h>
+#include <freerdp/client/disp.h>
 #include <freerdp/client/channels.h>
 #include <freerdp/channels/channels.h>
 
@@ -53,6 +54,7 @@
 #include <rfb/Rect.h>
 #include <rfb/Pixel.h>
 #include <rfb/util.h>
+#include <rfb/ScreenSet.h>
 #include <rfb/LogWriter.h>
 
 #include <rdp2vnc/RDPClient.h>
@@ -64,6 +66,12 @@ using namespace std;
 using namespace rfb;
 
 static rfb::LogWriter vlog("RDPClient");
+
+static int64_t getMSTimestamp() {
+  timeval tv;
+  gettimeofday(&tv, NULL);
+  return tv.tv_sec * 1000LL + tv.tv_usec / 1000;
+}
 
 struct RDPContext {
   rdpContext context;
@@ -77,7 +85,7 @@ struct RDPPointerImpl {
     if (!gdi) {
       return false;
     }
-    uint32_t cursorFormat = PIXEL_FORMAT_BGRA32;
+    uint32_t cursorFormat = PIXEL_FORMAT_RGBA32;
     x = pointer->xPos;
     y = pointer->yPos;
     width = pointer->width;
@@ -287,6 +295,15 @@ UINT RDPClient::rdpCliprdrServerFormatDataResponse(CliprdrClientContext* context
   return client->cliprdrServerFormatDataResponse(formatDataResponse);
 }
 
+UINT RDPClient::rdpDisplayControlCaps(DispClientContext* context, UINT32 maxNumMonitors,
+  UINT32 maxMonitorAreaFactorA, UINT32 maxMonitorAreaFactorB) {
+  if (!context) {
+    return CHANNEL_RC_OK;
+  }
+  RDPClient* client = (RDPClient *)context->custom;
+  return client->displayControlCaps(maxNumMonitors, maxMonitorAreaFactorA, maxMonitorAreaFactorB);
+}
+
 bool RDPClient::beginPaint() {
   return true;
 }
@@ -374,8 +391,11 @@ bool RDPClient::pointerSet(RDPPointerImpl* pointer) {
     } catch (rdr::Exception& e) {
       vlog.error("Set cursor: %s", e.str());
     }
-  } else {
-    firstCursor.reset(new RDPCursor(pointer->buffer, pointer->size, width, height, x, y));
+  }
+
+  lastCursor.reset(new RDPCursor(pointer->buffer, pointer->size, width, height, x, y));
+  if (desktop && !desktop->server) {
+    desktop->setFirstCursor(lastCursor);
   }
   return true;
 }
@@ -387,11 +407,10 @@ bool RDPClient::pointerSetPosition(uint32_t x, uint32_t y) {
     } catch (rdr::Exception& e) {
       vlog.error("Set cursor position: %s", e.str());
     }
-  } else {
-    if (firstCursor) {
-      firstCursor->posX = x;
-      firstCursor->posY = y;
-    }
+  }
+  if (lastCursor) {
+    lastCursor->posX = x;
+    lastCursor->posY = y;
   }
   return true;
 }
@@ -403,7 +422,12 @@ bool RDPClient::desktopResize() {
   if (!desktop) {
     return true;
   }
-  return desktop->resize();
+  if (!desktop->resize()) {
+    return false;
+  }
+  hasChangedSize = true;
+  lastChangeSizeTime = getMSTimestamp();
+  return true;
 }
 
 bool RDPClient::playSound(const PLAY_SOUND_UPDATE* playSound) {
@@ -429,6 +453,10 @@ void RDPClient::channelConnected(ChannelConnectedEventArgs* e) {
     cliprdrContext->ServerFormatListResponse = rdpCliprdrServerFormatListResponse;
     cliprdrContext->ServerFormatDataRequest = rdpCliprdrServerFormatDataRequest;
     cliprdrContext->ServerFormatDataResponse = rdpCliprdrServerFormatDataResponse;
+  } else if (strcmp(e->name, DISP_DVC_CHANNEL_NAME) == 0) {
+    dispContext = (DispClientContext *)e->pInterface;
+    dispContext->custom = (void *)this;
+    dispContext->DisplayControlCaps = rdpDisplayControlCaps;
   }
 }
 
@@ -455,9 +483,6 @@ UINT RDPClient::cliprdrMonitorReady(const CLIPRDR_MONITOR_READY* monitorReady) {
     return res;
   }
 
-  if ((res = cliprdrSendClientFormatList()) != CHANNEL_RC_OK) {
-    return res;
-  }
   return CHANNEL_RC_OK;
 }
 
@@ -562,7 +587,6 @@ UINT RDPClient::cliprdrSendClientFormatList() {
   memset(formats, 0, numFormats * sizeof(CLIPRDR_FORMAT));
   formats[0].formatId = CF_RAW;
   formats[1].formatId = CF_UNICODETEXT;
-  //formats[2].formatId = CF_TEXT;
   return cliprdrSendFormatList(formats, numFormats);
 }
 
@@ -581,12 +605,22 @@ UINT RDPClient::cliprdrSendFormatList(const CLIPRDR_FORMAT* formats, int numForm
   return CHANNEL_RC_OK;
 }
 
+UINT RDPClient::displayControlCaps(uint32_t maxNumMonitors,
+  uint32_t maxMonitorAreaFactorA, uint32_t maxMonitorAreaFactorB) {
+  this->maxNumMonitors = maxNumMonitors;
+  this->maxMonitorAreaFactorA = maxMonitorAreaFactorA;
+  this->maxMonitorAreaFactorB = maxMonitorAreaFactorB;
+  hasReceivedDisplayControlCaps = true;
+  return CHANNEL_RC_OK;
+}
+
 RDPClient::RDPClient(int argc_, char** argv_)
   : argc(argc_), argv(argv_), context(NULL), instance(NULL), desktop(NULL),
-    cliprdrContext(NULL), hasConnected(false), hasSentCliprdrFormats(false),
-    oldButtonMask(0), cliprdrRequestedFormatId(-1), hasCapsLocked(false),
-    hasSyncedCapsLocked(false), hasAnnouncedClipboard(false),
-    isClientClipboardAvailable(false), hasClientRequestedClipboard(false)
+    cliprdrContext(NULL), dispContext(NULL), hasConnected(false),
+    hasSentCliprdrFormats(false), oldButtonMask(0), cliprdrRequestedFormatId(-1),
+    hasCapsLocked(false), hasSyncedCapsLocked(false), hasAnnouncedClipboard(false),
+    isClientClipboardAvailable(false), hasClientRequestedClipboard(false), hasReceivedDisplayControlCaps(false),
+    hasChangedSize(false)
 {
 }
 
@@ -677,27 +711,26 @@ bool RDPClient::waitConnect() {
   return true;
 }
 
-bool RDPClient::registerFileDescriptors(fd_set *rfds, fd_set *wfds) {
-  if (freerdp_shall_disconnect(instance)) {
-    return false;
+void RDPClient::processsEvents() {
+  int64_t now = getMSTimestamp();
+  int64_t pastChange = now - lastChangeSizeTime;
+  int64_t pastLastProcess = now - lastProcessTime;
+  // we send the pointer every 200ms after changing the desktop size util 2s has past
+  // because previous messages may have been invalidated.
+  if (hasChangedSize && lastCursor) {
+    if (pastChange >= 2000) {
+      hasChangedSize = false;
+    }
+    if (pastLastProcess >= 200) {
+      try {
+        desktop->server->setCursor(lastCursor->width, lastCursor->height,
+          Point(lastCursor->x, lastCursor->y), lastCursor->data);
+      } catch (rdr::Exception& e) {
+        vlog.error("Set cursor: %s", e.str());
+      }
+      lastProcessTime = now;
+    }
   }
-  HANDLE handles[64];
-  DWORD numHandles = freerdp_get_event_handles(context, handles, 64);
-  if (numHandles == 0) {
-    return false;
-  }
-  for (DWORD i = 0; i < numHandles; ++i) {
-    int fd = GetEventFileDescriptor(handles[i]);
-    FD_SET(fd, rfds);
-  }
-  return true;
-}
-
-bool RDPClient::processsEvents() {
-  if (!freerdp_check_event_handles(context)) {
-    return false;
-  }
-  return true;
 }
 
 bool RDPClient::startThread() {
@@ -709,8 +742,8 @@ bool RDPClient::startThread() {
 
 void RDPClient::setRDPDesktop(RDPDesktop* desktop_) {
   desktop = desktop_;
-  if (firstCursor) {
-    desktop->setFirstCursor(firstCursor);
+  if (lastCursor) {
+    desktop->setFirstCursor(lastCursor);
   }
 }
 
@@ -936,8 +969,38 @@ void RDPClient::handleClipboardData(const char* data) {
   lock_guard<mutex> lock(mutexCliprdr);
   string utf8Data(data);
   u16string utf16Data = utf8::utf8to16(utf8Data);
-  hasSentCliprdrFormats = false;
   cliprdrSendDataResponse((const uint8_t *)utf16Data.c_str(), utf16Data.length() * 2 + 2);
+  hasSentCliprdrFormats = false;
+}
+
+unsigned int RDPClient::setScreenLayout(int fbWidth, int fbHeight, const rfb::ScreenSet& layout) {
+  // We only handle the simple case of one screen
+  if (!dispContext || !hasReceivedDisplayControlCaps) {
+    return rfb::resultProhibited;
+  }
+  int numMonitors = layout.num_screens();
+  if (numMonitors != 1 || fbWidth > maxMonitorAreaFactorA || fbHeight > maxMonitorAreaFactorB) {
+    return rfb::resultInvalid;
+  }
+  const Screen& screen = *layout.begin();
+  if (!screen.dimensions.equals(Rect(0, 0, fbWidth, fbHeight))) {
+    return rfb::resultInvalid;
+  }
+  DISPLAY_CONTROL_MONITOR_LAYOUT rdpLayout;
+  rdpLayout.Flags = DISPLAY_CONTROL_MONITOR_PRIMARY;
+  rdpLayout.Left = 0;
+  rdpLayout.Top = 0;
+  rdpLayout.Width = fbWidth;
+  rdpLayout.Height = fbHeight;
+  rdpLayout.Orientation = ORIENTATION_LANDSCAPE;
+  rdpLayout.PhysicalWidth = fbWidth / (96 / 25.4); // 96 DPI
+  rdpLayout.PhysicalHeight = fbHeight / (96 / 25.4);
+  rdpLayout.DesktopScaleFactor = 100;
+  rdpLayout.DeviceScaleFactor = 100;
+  if (dispContext->SendMonitorLayout(dispContext, 1, &rdpLayout) != CHANNEL_RC_OK) {
+    return rfb::resultInvalid;
+  }
+  return rfb::resultInvalid;
 }
 
 std::mutex &RDPClient::getMutex() {

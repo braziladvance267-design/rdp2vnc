@@ -306,11 +306,6 @@ int main(int argc, char** argv)
         }
       }
 
-      //if (!rdpClient.registerFileDescriptors(&rfds, &wfds)) {
-      //  vlog.error("RDP Client connection is broken");
-      //  throw rdr::EndOfStream();
-      //}
-
       tv.tv_sec = 0;
       tv.tv_usec = 10000;
       // Do the wait...
@@ -363,10 +358,7 @@ int main(int argc, char** argv)
       }
 
       // Process events on RDP connection
-      //if (!rdpClient.processsEvents()) {
-      //  vlog.error("RDP Client connection is broken");
-      //  throw rdr::EndOfStream();
-      //}
+      rdpClient.processsEvents();
     }
 
   } catch (rdr::Exception &e) {

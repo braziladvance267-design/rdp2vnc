@@ -73,7 +73,7 @@ void RDPDesktop::start(VNCServer* vs) {
         vlog.error("Set cursor position: %s", e.str());
       }
     }
-    firstCursor.reset(nullptr);
+    firstCursor.reset();
   }
 
   running = true;
@@ -126,7 +126,7 @@ ScreenSet RDPDesktop::computeScreenLayout()
 unsigned int RDPDesktop::setScreenLayout(int fb_width, int fb_height,
                                          const rfb::ScreenSet& layout)
 {
-  return rfb::resultProhibited;
+  return client->setScreenLayout(fb_width, fb_height, layout);
 }
 
 void RDPDesktop::handleClipboardRequest() {
@@ -141,9 +141,9 @@ void RDPDesktop::handleClipboardData(const char* data) {
   client->handleClipboardData(data);
 }
 
-bool RDPDesktop::setFirstCursor(std::unique_ptr<RDPCursor> &cursor)
+bool RDPDesktop::setFirstCursor(std::shared_ptr<RDPCursor> &cursor)
 {
-  firstCursor = std::move(cursor);
+  firstCursor = cursor;
   return true;
 }
 
