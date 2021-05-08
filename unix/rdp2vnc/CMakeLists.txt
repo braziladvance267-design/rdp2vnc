@@ -3,7 +3,7 @@ include_directories(${CMAKE_SOURCE_DIR}/unix)
 include_directories(${CMAKE_SOURCE_DIR}/common)
 
 find_package(PkgConfig REQUIRED)
-pkg_check_modules(PACKAGES REQUIRED freerdp2 freerdp-client2 winpr2 xkbcommon)
+pkg_check_modules(PACKAGES REQUIRED freerdp2 freerdp-client2 winpr2 xkbcommon ncurses)
 find_package(utf8cpp REQUIRED)
 
 add_executable(rdp2vnc
@@ -13,11 +13,15 @@ add_executable(rdp2vnc
   RDPPixelBuffer.cxx
   RDPDesktop.cxx
   RDPClient.cxx
+  Terminal.cxx
+  Greeter.cxx
+  tmt.c
+  font.cxx
 )
 
 target_link_libraries(rdp2vnc tx rfb network rdr unixcommon)
 
-target_link_libraries(rdp2vnc ${PACKAGES_LIBRARIES})
+target_link_libraries(rdp2vnc ${PACKAGES_LINK_LIBRARIES})
 target_include_directories(rdp2vnc PRIVATE ${PACKAGES_INCLUDE_DIRS} ${utf8cpp_INCLUDE_DIRS})
 target_compile_options(rdp2vnc PUBLIC ${PACKAGES_CFLAGS_OTHER})
 set_property(TARGET rdp2vnc PROPERTY CXX_STANDARD 17)

@@ -1,5 +1,4 @@
-/* Copyright (C) 2002-2005 RealVNC Ltd.  All Rights Reserved.
- * Copyright (C) 2004-2008 Constantin Kaplinsky.  All Rights Reserved.
+/* Copyright 2021 Dinglan Peng
  *    
  * This is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -22,6 +21,7 @@
 
 #include <mutex>
 #include <thread>
+#include <vector>
 #include <iostream>
 #include <strings.h>
 #include <sys/types.h>
@@ -41,6 +41,9 @@
 #include <rdp2vnc/RDPDesktop.h>
 #include <rdp2vnc/Geometry.h>
 #include <rdp2vnc/RDPClient.h>
+#include <rdp2vnc/DesktopMux.h>
+#include <rdp2vnc/Terminal.h>
+#include <rdp2vnc/Greeter.h>
 
 extern char buildtime[];
 
@@ -58,6 +61,7 @@ BoolParameter localhostOnly("localhost",
                             "Only allow connections from localhost",
                             false);
 BoolParameter rdpArg("RdpArg", "Command line arguments after this are for freerdp client", false);
+BoolParameter interactiveLogin("InteractiveLogin", "Show an interactive greeter", false);
 
 //
 // Allow the main loop terminate itself gracefully on receiving a signal.
@@ -194,6 +198,30 @@ static void usage()
   exit(1);
 }
 
+static void listenServer(std::list<SocketListener*>& listeners) {
+  if (rfbunixpath.getValueStr()[0] != '\0') {
+    listeners.push_back(new network::UnixListener(rfbunixpath, rfbunixmode));
+    vlog.info("Listening on %s (mode %04o)", (const char*)rfbunixpath, (int)rfbunixmode);
+  }
+
+  if ((int)rfbport != -1) {
+    if (localhostOnly)
+      createLocalTcpListeners(&listeners, (int)rfbport);
+    else
+      createTcpListeners(&listeners, 0, (int)rfbport);
+    vlog.info("Listening on port %d", (int)rfbport);
+  }
+
+  const char *hostsData = hostsFile.getData();
+  FileTcpFilter fileTcpFilter(hostsData);
+  if (strlen(hostsData) != 0)
+    for (std::list<SocketListener*>::iterator i = listeners.begin();
+         i != listeners.end();
+         i++)
+      (*i)->setFilter(&fileTcpFilter);
+  delete[] hostsData;
+}
+
 int main(int argc, char** argv)
 {
   initStdIOLoggers();
@@ -232,6 +260,184 @@ int main(int argc, char** argv)
 
     usage();
   }
+
+  //signal(SIGHUP, CleanupSignalHandler);
+  //signal(SIGINT, CleanupSignalHandler);
+  //signal(SIGTERM, CleanupSignalHandler);
+
+  std::unique_ptr<VNCServerST> server;
+  std::unique_ptr<RDPClient> rdpClient;
+  std::unique_ptr<RDPDesktop> rdpDesktop;
+  std::unique_ptr<Geometry> geo;
+  std::unique_ptr<DesktopMux> desktopMux;
+  std::unique_ptr<TerminalDesktop> terminalDesktop;
+  std::list<SocketListener*> listeners;
+  Geometry terminalGeo(1024, 768);
+
+  if (interactiveLogin) {
+    try {
+      desktopMux.reset(new DesktopMux());
+      terminalDesktop.reset(new TerminalDesktop(&terminalGeo));
+      Greeter greeter(rdpArgc, rdpArgv, caughtSignal);
+      if (!terminalDesktop->initTerminal(48, 64)) {
+        return -1;
+      }
+      desktopMux->desktop = terminalDesktop.get();
+      server.reset(new VNCServerST("rdp2vnc", desktopMux.get()));
+      
+      listenServer(listeners);
+      if (!runTerminal(terminalDesktop.get(), server.get(), listeners, &caughtSignal, [&](int infd, int outfd) {
+        greeter.handle(infd, outfd);
+      })) {
+        return 1;
+      }
+      rdpClient = move(greeter.getRDPClient());
+      if (!rdpClient) {
+        return 2;
+      }
+      //rdpClient.reset(new RDPClient(rdpArgc, rdpArgv, caughtSignal));
+      //if (!rdpClient->init() || !rdpClient->start() || !rdpClient->waitConnect()) {
+      //  return 2;
+      //}
+
+      geo.reset(new Geometry(rdpClient->width(), rdpClient->height()));
+      rdpDesktop.reset(new RDPDesktop(geo.get(), rdpClient.get()));
+      desktopMux->desktop = rdpDesktop.get();
+      terminalDesktop->stop();
+      rdpDesktop->start(server.get());
+
+      rdpClient->setRDPDesktop(rdpDesktop.get());
+      rdpClient->startThread();
+    } catch (rdr::Exception &e) {
+      vlog.error("%s", e.str());
+      return 1;
+    }
+  } else {
+    try {
+      rdpClient.reset(new RDPClient(rdpArgc, rdpArgv, caughtSignal));
+      if (!rdpClient->init() || !rdpClient->start() || !rdpClient->waitConnect()) {
+        return 2;
+      }
+
+      geo.reset(new Geometry(rdpClient->width(), rdpClient->height()));
+      rdpDesktop.reset(new RDPDesktop(geo.get(), rdpClient.get()));
+
+      server.reset(new VNCServerST("rdp2vnc", rdpDesktop.get()));
+      rdpClient->setRDPDesktop(rdpDesktop.get());
+      listenServer(listeners);
+      rdpClient->startThread();
+    } catch (rdr::Exception &e) {
+      vlog.error("%s", e.str());
+      return 1;
+    }
+  }
+
+  // RDP client and VNC Desktop have been set
+  try {
+    while (!caughtSignal) {
+      struct timeval tv;
+      fd_set rfds, wfds;
+      std::list<Socket*> sockets;
+      std::list<Socket*>::iterator i;
+      {
+        std::lock_guard<std::mutex> lock(rdpClient->getMutex());
+        
+        FD_ZERO(&rfds);
+        FD_ZERO(&wfds);
+
+        for (std::list<SocketListener*>::iterator i = listeners.begin();
+             i != listeners.end();
+             i++)
+          FD_SET((*i)->getFd(), &rfds);
+
+        server->getSockets(&sockets);
+        int clients_connected = 0;
+        for (i = sockets.begin(); i != sockets.end(); i++) {
+          if ((*i)->isShutdown()) {
+            server->removeSocket(*i);
+            delete (*i);
+          } else {
+            FD_SET((*i)->getFd(), &rfds);
+            if ((*i)->outStream().hasBufferedData())
+              FD_SET((*i)->getFd(), &wfds);
+            clients_connected++;
+          }
+        }
+      }
+
+      tv.tv_sec = 0;
+      tv.tv_usec = 10000;
+      // Do the wait...
+      int n = select(FD_SETSIZE, &rfds, &wfds, 0, &tv);
+
+      if (n < 0) {
+        if (errno == EINTR) {
+          vlog.debug("Interrupted select() system call");
+          continue;
+        } else {
+          throw rdr::SystemException("select", errno);
+        }
+      }
+
+
+      {
+        std::lock_guard<std::mutex> lock(rdpClient->getMutex());
+        // Accept new VNC connections
+        for (std::list<SocketListener*>::iterator i = listeners.begin();
+             i != listeners.end();
+             i++) {
+          if (FD_ISSET((*i)->getFd(), &rfds)) {
+            Socket* sock = (*i)->accept();
+            if (sock) {
+              server->addSocket(sock);
+            } else {
+              vlog.status("Client connection rejected");
+            }
+          }
+        }
+
+        Timer::checkTimeouts();
+
+        // Client list could have been changed.
+        server->getSockets(&sockets);
+
+        // Nothing more to do if there are no client connections.
+        if (sockets.empty())
+          continue;
+
+        // Process events on existing VNC connections
+        for (i = sockets.begin(); i != sockets.end(); i++) {
+          if (FD_ISSET((*i)->getFd(), &rfds)) {
+            server->processSocketReadEvent(*i);
+          }
+          if (FD_ISSET((*i)->getFd(), &wfds)) {
+            server->processSocketWriteEvent(*i);
+          }
+        }
+
+        // Process events on RDP connection
+        rdpClient->processsEvents();
+      }
+    }
+
+  } catch (rdr::Exception &e) {
+    vlog.error("%s", e.str());
+    return 1;
+  }
+
+  for (std::list<SocketListener*>::iterator i = listeners.begin();
+       i != listeners.end();
+       i++) {
+    delete *i;
+  }
+
+  if (rdpClient) {
+    rdpClient->stop();
+  }
+  vlog.info("Terminated");
+
+  return 0;
+  /*
 
   RDPClient rdpClient(rdpArgc, rdpArgv);
   if (!rdpClient.init() || !rdpClient.start() || !rdpClient.waitConnect()) {
@@ -377,4 +583,5 @@ int main(int argc, char** argv)
 
   vlog.info("Terminated");
   return 0;
+  */
 }

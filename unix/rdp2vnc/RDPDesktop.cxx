@@ -1,6 +1,4 @@
-/* Copyright (C) 2002-2005 RealVNC Ltd.  All Rights Reserved.
- * Copyright (C) 2004-2008 Constantin Kaplinsky.  All Rights Reserved.
- * Copyright 2017 Peter Astrand <astrand@cendio.se> for Cendio AB
+/* Copyright 2021 Dinglan Peng
  *    
  * This is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -18,6 +16,7 @@
  * USA.
  */
 
+#include <iostream>
 #include <memory>
 #include <assert.h>
 #include <signal.h>
@@ -31,6 +30,7 @@
 #include <rdp2vnc/RDPPixelBuffer.h>
 #include <rdp2vnc/RDPCursor.h>
 
+using namespace std;
 using namespace rfb;
 
 static rfb::LogWriter vlog("RDPDesktop");
@@ -41,9 +41,7 @@ static rfb::LogWriter vlog("RDPDesktop");
 //};
 
 RDPDesktop::RDPDesktop(Geometry* geometry_, RDPClient* client_)
-  : geometry(geometry_), server(0), client(client_),
-    running(false), ledMasks(), ledState(0),
-    codeMap(0), codeMapLen(0)
+  : geometry(geometry_), server(NULL), client(client_), running(false)
 {
 }
 
@@ -83,7 +81,7 @@ void RDPDesktop::stop() {
   running = false;
 
   server->setPixelBuffer(0);
-  server = 0;
+  server = NULL;
 }
 
 void RDPDesktop::terminate() {

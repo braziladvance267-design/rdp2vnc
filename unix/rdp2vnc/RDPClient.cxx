@@ -60,7 +60,7 @@
 #include <rdp2vnc/RDPClient.h>
 #include <rdp2vnc/RDPDesktop.h>
 #include <rdp2vnc/RDPCursor.h>
-#include <rdp2vnc/key.inc>
+#include <rdp2vnc/key.h>
 
 using namespace std;
 using namespace rfb;
@@ -614,8 +614,8 @@ UINT RDPClient::displayControlCaps(uint32_t maxNumMonitors,
   return CHANNEL_RC_OK;
 }
 
-RDPClient::RDPClient(int argc_, char** argv_)
-  : argc(argc_), argv(argv_), context(NULL), instance(NULL), desktop(NULL),
+RDPClient::RDPClient(int argc_, char** argv_, bool& stopSignal_)
+  : argc(argc_), argv(argv_), stopSignal(stopSignal_), context(NULL), instance(NULL), desktop(NULL),
     cliprdrContext(NULL), dispContext(NULL), hasConnected(false),
     hasSentCliprdrFormats(false), oldButtonMask(0), cliprdrRequestedFormatId(-1),
     hasCapsLocked(false), hasSyncedCapsLocked(false), hasAnnouncedClipboard(false),
@@ -673,6 +673,10 @@ bool RDPClient::stop() {
   if (!context) {
     return false;
   }
+  stopSignal = 1;
+  if (thread_) {
+    thread_->join();
+  }
   if (instance) {
     freerdp_disconnect(instance);
   }
@@ -712,25 +716,25 @@ bool RDPClient::waitConnect() {
 }
 
 void RDPClient::processsEvents() {
-  int64_t now = getMSTimestamp();
-  int64_t pastChange = now - lastChangeSizeTime;
-  int64_t pastLastProcess = now - lastProcessTime;
-  // we send the pointer every 200ms after changing the desktop size util 2s has past
-  // because previous messages may have been invalidated.
-  if (hasChangedSize && lastCursor) {
-    if (pastChange >= 2000) {
-      hasChangedSize = false;
-    }
-    if (pastLastProcess >= 200) {
-      try {
-        desktop->server->setCursor(lastCursor->width, lastCursor->height,
-          Point(lastCursor->x, lastCursor->y), lastCursor->data);
-      } catch (rdr::Exception& e) {
-        vlog.error("Set cursor: %s", e.str());
-      }
-      lastProcessTime = now;
-    }
-  }
+  //int64_t now = getMSTimestamp();
+  //int64_t pastChange = now - lastChangeSizeTime;
+  //int64_t pastLastProcess = now - lastProcessTime;
+  //// we send the pointer every 200ms after changing the desktop size util 2s has past
+  //// because previous messages may have been invalidated.
+  //if (hasChangedSize && lastCursor) {
+  //  if (pastChange >= 2000) {
+  //    hasChangedSize = false;
+  //  }
+  //  if (pastLastProcess >= 200) {
+  //    try {
+  //      desktop->server->setCursor(lastCursor->width, lastCursor->height,
+  //        Point(lastCursor->x, lastCursor->y), lastCursor->data);
+  //    } catch (rdr::Exception& e) {
+  //      vlog.error("Set cursor: %s", e.str());
+  //    }
+  //    lastProcessTime = now;
+  //  }
+  //}
 }
 
 bool RDPClient::startThread() {
@@ -756,6 +760,9 @@ void RDPClient::eventLoop() {
       numHandles = freerdp_get_event_handles(context, handles, 64);
     }
     if (numHandles == 0) {
+      return;
+    }
+    if (stopSignal) {
       return;
     }
     if (WaitForMultipleObjects(numHandles, handles, FALSE, 10000) == WAIT_FAILED) {

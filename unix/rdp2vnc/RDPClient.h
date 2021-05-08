@@ -52,7 +52,7 @@ class RDPPointerImpl;
 class RDPClient
 {
 public:
-  RDPClient(int argc, char** argv);
+  RDPClient(int argc, char** argv, bool& stopSignal_);
   ~RDPClient();
   bool init();
   bool start();
@@ -124,6 +124,7 @@ private:
 
   int argc;
   char** argv;
+  bool& stopSignal;
   rdpContext* context;
   freerdp* instance;
   RDPDesktop* desktop;

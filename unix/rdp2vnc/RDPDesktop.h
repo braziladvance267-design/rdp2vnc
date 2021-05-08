@@ -1,6 +1,4 @@
-/* Copyright (C) 2002-2005 RealVNC Ltd.  All Rights Reserved.
- * Copyright (C) 2004-2008 Constantin Kaplinsky.  All Rights Reserved.
- * Copyright 2017 Peter Astrand <astrand@cendio.se> for Cendio AB
+/* Copyright 2021 Dinglan Peng
  *    
  * This is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -39,7 +37,6 @@ class RDPDesktop : public rfb::SDesktop
 public:
   RDPDesktop(Geometry* geometry, RDPClient* client);
   virtual ~RDPDesktop();
-  void poll();
   // -=- SDesktop interface
   virtual void start(rfb::VNCServer* vs);
   virtual void stop();
@@ -62,10 +59,6 @@ protected:
   rfb::VNCServer* server;
   RDPClient *client;
   bool running;
-  int ledMasks[RDPDESKTOP_N_LEDS];
-  unsigned ledState;
-  const unsigned short *codeMap;
-  unsigned codeMapLen;
   std::shared_ptr<RDPCursor> firstCursor;
   rfb::ScreenSet computeScreenLayout();
   bool setFirstCursor(std::shared_ptr<RDPCursor> &cursor);
