@@ -24,6 +24,7 @@
 #include <thread>
 #include <vector>
 #include <iostream>
+#include <clocale>
 #include <cassert>
 #include <strings.h>
 #include <sys/types.h>
@@ -59,6 +60,7 @@ static rfb::LogWriter vlog("Terminal");
 TerminalDesktop::TerminalDesktop(Geometry* geometry_)
   : geometry(geometry_), server(NULL), running(false), vt(NULL)
 {
+  std::setlocale(LC_ALL, "en_US.utf8");
   PixelFormat format(32, 24, false, true, 255, 255, 255, 16, 8, 0);
   pb.reset(new ManagedPixelBuffer(format, geometry->width(), geometry->height()));
   int stride;
@@ -135,7 +137,7 @@ void TerminalDesktop::keyEvent(rdr::U32 keysym, rdr::U32 xtcode, bool down) {
   if (down) {
     const char* str = NULL;
     auto it = keysymTMTKeyMap.find(keysym);
-    if (pressedKeys.count(XKB_KEY_Tab) && keysym == XKB_KEY_Tab) {
+    if (keysym == XKB_KEY_Tab && (pressedKeys.count(XKB_KEY_Shift_L) || pressedKeys.count(XKB_KEY_Shift_R))) {
       str = TMT_KEY_BACK_TAB;
     } else if (it != keysymTMTKeyMap.end()) {
       str = it->second;
@@ -145,7 +147,9 @@ void TerminalDesktop::keyEvent(rdr::U32 keysym, rdr::U32 xtcode, bool down) {
     } else {
       char buffer[7];
       int len = xkb_keysym_to_utf8(keysym, buffer, 7);
-      write(inPipeFd[1], buffer, len);
+      if (len > 0) {
+        write(inPipeFd[1], buffer, len - 1);
+      }
     }
   }
 }
@@ -207,17 +211,17 @@ void TerminalDesktop::processTerminalEvent(tmt_msg_t m, TMT* vt, const void* arg
           if (screen->lines[r]->dirty) {
             for (size_t c = 0; c < screen->ncol; ++c) {
               Rect glyphRect = terminalPosToRFBRect(c, r);
-              //cerr << glyphRect.tl.x << " " << glyphRect.tl.y << " " << glyphRect.br.x << " " << glyphRect.br.y << endl;
               int stride;
               uint8_t* buffer = pb->getBufferRW(glyphRect, &stride);
               wchar_t ch = screen->lines[r]->chars[c].c;
               size_t glyphIndex = ch < glyphBitmapSize ? ch : 0;
               for (int i = 0; i < glyphHeight; ++i) {
+                uint16_t line = glyphBitmap[glyphIndex][i];
                 for (int j = 0; j < glyphWidth; ++j) {
-                  uint8_t pixel = glyphBitmap[glyphIndex][i][j];
-                  buffer[(i * stride + j) * 4 + 0] = pixel ? 0 : 255;
-                  buffer[(i * stride + j) * 4 + 1] = pixel ? 0 : 255;
-                  buffer[(i * stride + j) * 4 + 2] = pixel ? 0 : 255;
+                  uint8_t pixel = (line & (1 << j)) ? 0 : 255;
+                  buffer[(i * stride + j) * 4 + 0] = pixel;
+                  buffer[(i * stride + j) * 4 + 1] = pixel;
+                  buffer[(i * stride + j) * 4 + 2] = pixel;
                   buffer[(i * stride + j) * 4 + 3] = 0;
                 }
               }
@@ -286,9 +290,6 @@ bool runTerminal(TerminalDesktop* desktop, rfb::VNCServerST* server,
   handlerThread.detach();
 
   while (true) {
-    if (hasTerminalFinished) {
-      return true;
-    }
     if (*caughtSignal) {
       return false;
     }
@@ -375,6 +376,9 @@ bool runTerminal(TerminalDesktop* desktop, rfb::VNCServerST* server,
       if (FD_ISSET((*i)->getFd(), &wfds)) {
         server->processSocketWriteEvent(*i);
       }
+    }
+    if (hasTerminalFinished) {
+      return true;
     }
   }
 }

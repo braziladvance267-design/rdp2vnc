@@ -29,36 +29,69 @@ class DesktopMux : public rfb::SDesktop
 {
 public:
   virtual void start(rfb::VNCServer* vs) {
+    if (!desktop) {
+      return;
+    }
     desktop->start(vs);
   }
   virtual void stop() {
+    if (!desktop) {
+      return;
+    }
     desktop->stop();
   }
   virtual void queryConnection(network::Socket* sock, const char* userName) {
+    if (!desktop) {
+      return;
+    }
     desktop->queryConnection(sock, userName);
   }
   virtual void terminate() {
+    if (!desktop) {
+      return;
+    }
     desktop->terminate();
   }
   virtual unsigned int setScreenLayout(int fb_width, int fb_height, const rfb::ScreenSet& layout) {
+    if (!desktop) {
+      return rfb::resultProhibited;
+    }
     return desktop->setScreenLayout(fb_width, fb_height, layout);
   }
   virtual void handleClipboardRequest() {
+    if (!desktop) {
+      return;
+    }
     desktop->handleClipboardRequest();
   }
   virtual void handleClipboardAnnounce(bool available) {
+    if (!desktop) {
+      return;
+    }
     desktop->handleClipboardAnnounce(available);
   }
   virtual void handleClipboardData(const char* data) {
+    if (!desktop) {
+      return;
+    }
     desktop->handleClipboardData(data);
   }
   virtual void keyEvent(rdr::U32 keysym, rdr::U32 keycode, bool down) {
+    if (!desktop) {
+      return;
+    }
     desktop->keyEvent(keysym, keycode, down);
   }
   virtual void pointerEvent(const rfb::Point& pos, int buttonMask) {
+    if (!desktop) {
+      return;
+    }
     desktop->pointerEvent(pos, buttonMask);
   }
   virtual void clientCutText(const char* str) {
+    if (!desktop) {
+      return;
+    }
     desktop->clientCutText(str);
   }
   SDesktop* desktop;

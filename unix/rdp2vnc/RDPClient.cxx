@@ -630,7 +630,7 @@ RDPClient::~RDPClient() {
   }
 }
 
-bool RDPClient::init() {
+bool RDPClient::init(char* domain, char* username, char* password) {
   DWORD status;
   RDP_CLIENT_ENTRY_POINTS clientEntryPoints;
   memset(&clientEntryPoints, 0, sizeof(RDP_CLIENT_ENTRY_POINTS));
@@ -655,6 +655,15 @@ bool RDPClient::init() {
   if (status != 0) {
     freerdp_client_settings_command_line_status_print(context->settings, status, argc, argv);
     return false;
+  }
+  if (domain) {
+    context->settings->Domain = domain;
+  }
+  if (username) {
+    context->settings->Username = username;
+  }
+  if (password) {
+    context->settings->Password = password;
   }
   return true;
 }
@@ -719,13 +728,13 @@ void RDPClient::processsEvents() {
   //int64_t now = getMSTimestamp();
   //int64_t pastChange = now - lastChangeSizeTime;
   //int64_t pastLastProcess = now - lastProcessTime;
-  //// we send the pointer every 200ms after changing the desktop size util 2s has past
+  //// we send the pointer every 100ms after changing the desktop size util 1s has past
   //// because previous messages may have been invalidated.
   //if (hasChangedSize && lastCursor) {
-  //  if (pastChange >= 2000) {
+  //  if (pastChange >= 1000) {
   //    hasChangedSize = false;
   //  }
-  //  if (pastLastProcess >= 200) {
+  //  if (pastLastProcess >= 100) {
   //    try {
   //      desktop->server->setCursor(lastCursor->width, lastCursor->height,
   //        Point(lastCursor->x, lastCursor->y), lastCursor->data);

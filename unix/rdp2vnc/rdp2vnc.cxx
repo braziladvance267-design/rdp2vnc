@@ -293,17 +293,15 @@ int main(int argc, char** argv)
       }
       rdpClient = move(greeter.getRDPClient());
       if (!rdpClient) {
+        desktopMux->desktop = nullptr;
+        server.reset(nullptr);
         return 2;
       }
-      //rdpClient.reset(new RDPClient(rdpArgc, rdpArgv, caughtSignal));
-      //if (!rdpClient->init() || !rdpClient->start() || !rdpClient->waitConnect()) {
-      //  return 2;
-      //}
 
       geo.reset(new Geometry(rdpClient->width(), rdpClient->height()));
       rdpDesktop.reset(new RDPDesktop(geo.get(), rdpClient.get()));
       desktopMux->desktop = rdpDesktop.get();
-      terminalDesktop->stop();
+      //terminalDesktop->stop();
       rdpDesktop->start(server.get());
 
       rdpClient->setRDPDesktop(rdpDesktop.get());
@@ -315,7 +313,7 @@ int main(int argc, char** argv)
   } else {
     try {
       rdpClient.reset(new RDPClient(rdpArgc, rdpArgv, caughtSignal));
-      if (!rdpClient->init() || !rdpClient->start() || !rdpClient->waitConnect()) {
+      if (!rdpClient->init(NULL, NULL, NULL) || !rdpClient->start() || !rdpClient->waitConnect()) {
         return 2;
       }
 

@@ -54,7 +54,7 @@ class RDPClient
 public:
   RDPClient(int argc, char** argv, bool& stopSignal_);
   ~RDPClient();
-  bool init();
+  bool init(char* domain, char* username, char* password);
   bool start();
   bool stop();
   bool waitConnect();
