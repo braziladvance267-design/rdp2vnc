@@ -32,7 +32,7 @@
 class Greeter
 {
 public:
-  Greeter(int argc_, char** argv_, bool& stopSignal_);
+  Greeter(int argc_, char** argv_, bool& stopSignal_, TerminalDesktop& desktop);
   void handle(int infd, int outfd);
   std::unique_ptr<RDPClient>& getRDPClient();
 private:
@@ -40,6 +40,7 @@ private:
   char** argv;
   bool& stopSignal;
   std::unique_ptr<RDPClient> client;
+  TerminalDesktop& desktop;
 };
 
 #endif // __GREETER_H__

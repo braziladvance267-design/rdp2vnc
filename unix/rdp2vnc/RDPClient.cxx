@@ -630,7 +630,7 @@ RDPClient::~RDPClient() {
   }
 }
 
-bool RDPClient::init(char* domain, char* username, char* password) {
+bool RDPClient::init(char* domain, char* username, char* password, int width, int height) {
   DWORD status;
   RDP_CLIENT_ENTRY_POINTS clientEntryPoints;
   memset(&clientEntryPoints, 0, sizeof(RDP_CLIENT_ENTRY_POINTS));
@@ -664,6 +664,12 @@ bool RDPClient::init(char* domain, char* username, char* password) {
   }
   if (password) {
     context->settings->Password = password;
+  }
+  if (width != -1) {
+    context->settings->DesktopWidth = width;
+  }
+  if (height != -1) {
+    context->settings->DesktopHeight = height;
   }
   return true;
 }

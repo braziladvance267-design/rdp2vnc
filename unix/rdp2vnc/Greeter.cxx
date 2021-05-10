@@ -1,6 +1,4 @@
-/* Copyright (C) 2002-2005 RealVNC Ltd.  All Rights Reserved.
- * Copyright (C) 2004-2008 Constantin Kaplinsky.  All Rights Reserved.
- * Copyright 2017 Peter Astrand <astrand@cendio.se> for Cendio AB
+/* Copyright Dinglan Peng
  *    
  * This is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -19,6 +17,7 @@
  */
 
 #include <string>
+#include <tuple>
 #include <iostream>
 #include <rfb/Logger_stdio.h>
 #include <rfb/LogWriter.h>
@@ -26,81 +25,90 @@
 #include <ncurses.h>
 
 #include <rdp2vnc/RDPClient.h>
+#include <rdp2vnc/Terminal.h>
 #include <rdp2vnc/Greeter.h>
+#include <rdp2vnc/Geometry.h>
 
 using namespace std;
 using namespace rfb;
 
 static rfb::LogWriter vlog("Greeter");
 
-Greeter::Greeter(int argc_, char** argv_, bool& stopSignal_)
-  : argc(argc_), argv(argv_), stopSignal(stopSignal_) {
+Greeter::Greeter(int argc_, char** argv_, bool& stopSignal_, TerminalDesktop& desktop_)
+  : argc(argc_), argv(argv_), stopSignal(stopSignal_), desktop(desktop_) {
+}
+
+bool readLine(int infd, int outfd, const string &prompt, string &line, bool visible = true) {
+  if (write(outfd, prompt.c_str(), prompt.length()) <= 0) {
+    return false;
+  }
+  char ch;
+  char mask = '*';
+  while (true) {
+    if (read(infd, &ch, 1) <= 0) {
+      return false;
+    }
+    if (ch == '\r' || ch == '\n') {
+      break;
+    } else if (ch == '\b') {
+      if (!line.empty()) {
+        if (write(outfd, "\b \b", 3) <= 0) {
+          return false;
+        }
+        line = line.substr(0, line.length() - 1);
+      }
+    } else {
+      line += ch;
+      if (write(outfd, visible ? &ch : &mask, 1) <= 0) {
+        return false;
+      }
+    }
+  }
+  return true;
 }
 
 void Greeter::handle(int infd, int outfd) {
+  // Firstly we try to log in the RDP server without credentials
+  client.reset(new RDPClient(argc, argv, stopSignal));
+  if (client->init(nullptr, nullptr, nullptr, -1, -1) &&
+      client->start() && client->waitConnect()) {
+    return;
+  }
+  client.reset(nullptr);
   //FILE* infile = fdopen(infd, "rb");
   //FILE* outfile = fdopen(outfd, "wb");
   string strBanner = "请输入用户名及密码以登录系统。\r\n";
   string strUsername = "用户名：";
   string strPassword = "\r\n密码：";
+  string strResolution = "\r\n分辨率：";
   string strInvisible = "*";
-  string strNewline = "\r\n";
+  string strWait = "\r\n登录中，请稍候…\r\n";
   string strFailed = "登录失败！请重试。\r\n";
-  string strBackspace = "\b \b";
+  string strInvalidResolution = "您输入的分辨率无效！\r\n";
   write(outfd, strBanner.c_str(), strBanner.length());
   const int maxRetryTimes = 5;
   for (int i = 0; i < maxRetryTimes; ++i) {
-    string domain, username, password;
-    if (write(outfd, strUsername.c_str(), strUsername.length()) <= 0) {
+    string domain, username, password, resolution;
+    
+    if (!readLine(infd, outfd, strUsername, username) || !readLine(infd, outfd, strPassword, password, false)) {
       return;
     }
-    char ch;
-    while (true) {
-      if (read(infd, &ch, 1) <= 0) {
-        return;
-      }
-      if (ch == '\r' || ch == '\n') {
-        break;
-      } else if (ch == '\b') {
-        if (!username.empty()) {
-          if (write(outfd, strBackspace.c_str(), strBackspace.length()) <= 0) {
-            return;
-          }
-          username = username.substr(0, username.length() - 1);
-        }
-      } else {
-        username += ch;
-        if (write(outfd, &ch, 1) <= 0) {
-          return;
-        }
-      }
-    }
 
-    if (write(outfd, strPassword.c_str(), strPassword.length()) <= 0) {
+    int width;
+    int height;
+    tie(width, height) = desktop.getRequestedDesktopSize();
+    if (!(width > 0 && width < 10000 && height > 0 && height < 10000)) {
+      auto &&geometry = desktop.getGeometry();
+      width = geometry.width();
+      height = geometry.height();
+    }
+    resolution = to_string(width) + "x" + to_string(height);
+
+    if (!readLine(infd, outfd, strResolution + resolution, resolution)) {
       return;
     }
-    while (true) {
-      if (read(infd, &ch, 1) <= 0) {
-        return;
-      }
-      if (ch == '\r' || ch == '\n') {
-        break;
-      } else if (ch == '\b') {
-        if (!password.empty()) {
-          if (write(outfd, strBackspace.c_str(), strBackspace.length()) <= 0) {
-            return;
-          }
-          password = password.substr(0, password.length() - 1);
-        }
-      } else {
-        password += ch;
-        if (write(outfd, strInvisible.c_str(), strInvisible.length()) <= 0) {
-          return;
-        }
-      }
-    }
 
-    if (write(outfd, strNewline.c_str(), strNewline.length()) <= 0) {
+    if (write(outfd, strWait.c_str(), strWait.length()) <= 0) {
       return;
     }
 
@@ -108,11 +116,25 @@ void Greeter::handle(int infd, int outfd) {
     if (pos != string::npos) {
       domain = username.substr(0, pos);
     }
+    pos = resolution.find('x');
+    if (pos != string::npos && pos != resolution.length() - 1) {
+      try {
+        width = stoi(resolution.substr(0, pos));
+        height = stoi(resolution.substr(pos + 1));
+      } catch (std::exception& e) {
+        if (write(outfd, strInvalidResolution.c_str(), strInvalidResolution.length()) <= 0) {
+          return;
+        }
+        width = -1;
+        height = -1;
+      }
+    }
     char* domainCstr = domain.empty() ? nullptr : strdup(domain.c_str());
     char* usernameCstr = strdup(username.c_str());
     char* passwordCstr = strdup(password.c_str());
     client.reset(new RDPClient(argc, argv, stopSignal));
-    if (!client->init(domainCstr, usernameCstr, passwordCstr) || !client->start() || !client->waitConnect()) {
+    if (!client->init(domainCstr, usernameCstr, passwordCstr, width, height) ||
+        !client->start() || !client->waitConnect()) {
       client.reset(nullptr);
       if (write(outfd, strFailed.c_str(), strFailed.length()) <= 0) {
         return;

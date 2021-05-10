@@ -278,7 +278,7 @@ int main(int argc, char** argv)
     try {
       desktopMux.reset(new DesktopMux());
       terminalDesktop.reset(new TerminalDesktop(&terminalGeo));
-      Greeter greeter(rdpArgc, rdpArgv, caughtSignal);
+      Greeter greeter(rdpArgc, rdpArgv, caughtSignal, *terminalDesktop.get());
       if (!terminalDesktop->initTerminal(48, 64)) {
         return -1;
       }
@@ -313,7 +313,7 @@ int main(int argc, char** argv)
   } else {
     try {
       rdpClient.reset(new RDPClient(rdpArgc, rdpArgv, caughtSignal));
-      if (!rdpClient->init(NULL, NULL, NULL) || !rdpClient->start() || !rdpClient->waitConnect()) {
+      if (!rdpClient->init(NULL, NULL, NULL, -1, -1) || !rdpClient->start() || !rdpClient->waitConnect()) {
         return 2;
       }
 

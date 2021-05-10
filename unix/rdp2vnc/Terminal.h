@@ -1,6 +1,4 @@
-/* Copyright (C) 2002-2005 RealVNC Ltd.  All Rights Reserved.
- * Copyright (C) 2004-2008 Constantin Kaplinsky.  All Rights Reserved.
- * Copyright 2017 Peter Astrand <astrand@cendio.se> for Cendio AB
+/* Copyright Dinglan Peng
  *    
  * This is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -56,6 +54,8 @@ public:
   int getInFd();
   int* getOutFds();
   TMT* getTerminal();
+  std::pair<int, int> getRequestedDesktopSize();
+  const Geometry& getGeometry();
 private:
   rfb::ScreenSet computeScreenLayout();
   static void callbackTMT(tmt_msg_t m, TMT* vt, const void* a, void* p);
@@ -72,6 +72,8 @@ private:
   int inPipeFd[2];
   int outPipeFd[2];
   std::unordered_set<uint32_t> pressedKeys;
+  int requestedWidth;
+  int requestedHeight;
 };
 
 bool runTerminal(TerminalDesktop* desktop, rfb::VNCServerST* server,

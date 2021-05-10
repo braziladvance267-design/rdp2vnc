@@ -1,5 +1,4 @@
-/* Copyright (C) 2002-2005 RealVNC Ltd.  All Rights Reserved.
- * Copyright (C) 2004-2008 Constantin Kaplinsky.  All Rights Reserved.
+/* Copyright Dinglan Peng
  * Copyright 2017 Peter Astrand <astrand@cendio.se> for Cendio AB
  *    
  * This is free software; you can redistribute it and/or modify
@@ -58,7 +57,7 @@ using namespace network;
 static rfb::LogWriter vlog("Terminal");
 
 TerminalDesktop::TerminalDesktop(Geometry* geometry_)
-  : geometry(geometry_), server(NULL), running(false), vt(NULL)
+  : geometry(geometry_), server(NULL), running(false), vt(NULL), requestedWidth(-1), requestedHeight(-1)
 {
   std::setlocale(LC_ALL, "en_US.utf8");
   PixelFormat format(32, 24, false, true, 255, 255, 255, 16, 8, 0);
@@ -69,9 +68,9 @@ TerminalDesktop::TerminalDesktop(Geometry* geometry_)
   int height = geometry->height();
   for (int i = 0; i < height; ++i) {
     for (int j = 0; j < width; ++j) {
-      buffer[(i * stride + j) * 4 + 0] = 255;
-      buffer[(i * stride + j) * 4 + 1] = 255;
-      buffer[(i * stride + j) * 4 + 2] = 255;
+      buffer[(i * stride + j) * 4 + 0] = 0x22;
+      buffer[(i * stride + j) * 4 + 1] = 0x28;
+      buffer[(i * stride + j) * 4 + 2] = 0x27;
       buffer[(i * stride + j) * 4 + 3] = 0;
     }
   }
@@ -172,6 +171,10 @@ ScreenSet TerminalDesktop::computeScreenLayout()
 unsigned int TerminalDesktop::setScreenLayout(int fb_width, int fb_height,
                                          const rfb::ScreenSet& layout)
 {
+  if (layout.num_screens() == 1) {
+    requestedWidth = fb_width;
+    requestedHeight = fb_height;
+  }
   return rfb::resultProhibited;
 }
 
@@ -218,11 +221,22 @@ void TerminalDesktop::processTerminalEvent(tmt_msg_t m, TMT* vt, const void* arg
               for (int i = 0; i < glyphHeight; ++i) {
                 uint16_t line = glyphBitmap[glyphIndex][i];
                 for (int j = 0; j < glyphWidth; ++j) {
-                  uint8_t pixel = (line & (1 << j)) ? 0 : 255;
-                  buffer[(i * stride + j) * 4 + 0] = pixel;
-                  buffer[(i * stride + j) * 4 + 1] = pixel;
-                  buffer[(i * stride + j) * 4 + 2] = pixel;
-                  buffer[(i * stride + j) * 4 + 3] = 0;
+                  //uint8_t pixel = (line & (1 << j)) ? 255 : 0;
+                  //buffer[(i * stride + j) * 4 + 0] = pixel;
+                  //buffer[(i * stride + j) * 4 + 1] = pixel;
+                  //buffer[(i * stride + j) * 4 + 2] = pixel;
+                  //buffer[(i * stride + j) * 4 + 3] = 0;
+                  if (line & (1 << j)) {
+                    buffer[(i * stride + j) * 4 + 0] = 0xf2;
+                    buffer[(i * stride + j) * 4 + 1] = 0xf8;
+                    buffer[(i * stride + j) * 4 + 2] = 0xf8;
+                    buffer[(i * stride + j) * 4 + 3] = 0;
+                  } else {
+                    buffer[(i * stride + j) * 4 + 0] = 0x22;
+                    buffer[(i * stride + j) * 4 + 1] = 0x28;
+                    buffer[(i * stride + j) * 4 + 2] = 0x27;
+                    buffer[(i * stride + j) * 4 + 3] = 0;
+                  }
                 }
               }
               if (server) {
@@ -271,6 +285,14 @@ int* TerminalDesktop::getOutFds() {
 
 TMT* TerminalDesktop::getTerminal() {
   return vt;
+}
+
+std::pair<int, int> TerminalDesktop::getRequestedDesktopSize() {
+  return make_pair(requestedWidth, requestedHeight);
+}
+
+const Geometry& TerminalDesktop::getGeometry() {
+  return *geometry;
 }
 
 bool runTerminal(TerminalDesktop* desktop, rfb::VNCServerST* server,
