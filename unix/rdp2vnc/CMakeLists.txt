@@ -20,7 +20,6 @@ add_executable(rdp2vnc
   RDPClient.cxx
   Terminal.cxx
   Greeter.cxx
-  tmt.c
 )
 
 target_link_libraries(rdp2vnc tx rfb network rdr unixcommon)

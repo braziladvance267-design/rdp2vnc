@@ -59,12 +59,18 @@ public:
 private:
   rfb::ScreenSet computeScreenLayout();
   static int statePutGlyph(VTermGlyphInfo* info, VTermPos pos, void* user);
+  static int stateMoveRect(VTermRect dest, VTermRect src, void* user);
+  static int stateErase(VTermRect rect, int selective, void* user);
   static void terminalOutputCallback(const char* s, size_t len, void* user);
   void putGlyph(VTermGlyphInfo* info, VTermPos pos);
+  void moveRect(VTermRect dest, VTermRect src);
+  void erase(VTermRect rect, int selective);
   void terminalOutput(const char* s, size_t len);
   void renderGlyph(int x, int y, int width, uint32_t ch, uint32_t fg, uint32_t bg);
+  void renderCell(const VTermScreenCell& cell, int x, int y);
   rfb::Rect terminalPosToRFBRect(int x, int y, int width);
   rfb::Rect terminalLineToRFBRect(int line);
+  rfb::Rect terminalRectToRFBRect(int x1, int x2, int y1, int y2);
   Geometry* geometry;
   std::unique_ptr<rfb::ManagedPixelBuffer> pb;
   rfb::VNCServer* server;

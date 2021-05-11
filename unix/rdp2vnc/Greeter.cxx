@@ -50,12 +50,36 @@ bool readLine(int infd, int outfd, const string &prompt, string &line, bool visi
     }
     if (ch == '\r' || ch == '\n') {
       break;
-    } else if (ch == '\b') {
+    } else if (ch == '\b' || ch == 127) {
       if (!line.empty()) {
-        if (write(outfd, "\b \b", 3) <= 0) {
+        if (write(outfd, "\e[1D \e[1D", 9) <= 0) {
           return false;
         }
         line = line.substr(0, line.length() - 1);
+      }
+    } else if (ch == '\e') {
+      // ignore CSI
+      while (true) {
+        if (read(infd, &ch, 1) <= 0) {
+          return false;
+        }
+        if ((ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z')) {
+          break;
+        }
+        switch (ch) {
+        case '@':
+        case '[':
+        case '\\':
+        case ']':
+        case '^':
+        case '_':
+        case '`':
+        case '{':
+        case '|':
+        case '}':
+        case '~':
+          break;
+        }
       }
     } else {
       line += ch;

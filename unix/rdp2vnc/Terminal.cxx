@@ -104,6 +104,8 @@ bool TerminalDesktop::initTerminal(int lines, int cols) {
   memset(&screenCallbacks, 0, sizeof(VTermScreenCallbacks));
   memset(&stateCallbacks, 0, sizeof(VTermStateCallbacks));
   stateCallbacks.putglyph = statePutGlyph;
+  stateCallbacks.moverect = stateMoveRect;
+  stateCallbacks.erase = stateErase;
   vterm_screen_set_callbacks(vtScreen, &screenCallbacks, this);
   vterm_state_set_callbacks(vtState, &stateCallbacks, this);
   vterm_output_set_callback(vt, terminalOutputCallback, this);
@@ -154,6 +156,11 @@ void TerminalDesktop::keyEvent(rdr::U32 keysym, rdr::U32 xtcode, bool down) {
     pressedKeys.erase(keysym);
   }
   if (down) {
+    if (keysym == XKB_KEY_Shift_L || keysym == XKB_KEY_Shift_R ||
+        keysym == XKB_KEY_Alt_L || keysym == XKB_KEY_Alt_R ||
+        keysym == XKB_KEY_Control_L || keysym == XKB_KEY_Control_R) {
+      return;
+    }
     int mod = VTERM_MOD_NONE;
     if (pressedKeys.count(XKB_KEY_Shift_L) || pressedKeys.count(XKB_KEY_Shift_R)) {
       mod |= VTERM_MOD_SHIFT;
@@ -228,6 +235,16 @@ rfb::Rect TerminalDesktop::terminalLineToRFBRect(int line) {
   return Rect(x1, y1, x2, y2);
 }
 
+rfb::Rect TerminalDesktop::terminalRectToRFBRect(int x1, int x2, int y1, int y2) {
+  int padx = (geometry->width() - cols * glyphWidth / 2) / 2;
+  int pady = (geometry->height() - lines * glyphHeight) / 2;
+  int x1r = padx + glyphWidth / 2 * x1;
+  int y1r = pady + glyphHeight * y1;
+  int x2r = padx + glyphWidth / 2 * x2;
+  int y2r = pady + glyphHeight * y2;
+  return Rect(x1r, y1r, x2r, y2r);
+}
+
 int TerminalDesktop::getInFd() {
   return inPipeFd[0];
 }
@@ -254,6 +271,89 @@ int TerminalDesktop::statePutGlyph(VTermGlyphInfo* info, VTermPos pos, void* use
   return 1;
 }
 
+int TerminalDesktop::stateMoveRect(VTermRect dest, VTermRect src, void* user) {
+  TerminalDesktop* desktop = (TerminalDesktop *)user;
+  desktop->moveRect(dest, src);
+  return 1;
+}
+
+int TerminalDesktop::stateErase(VTermRect rect, int selective, void* user) {
+  TerminalDesktop* desktop = (TerminalDesktop *)user;
+  desktop->erase(rect, selective);
+  return 1;
+}
+
+void TerminalDesktop::moveRect(VTermRect dest, VTermRect src) {
+  int w1 = src.end_col - src.start_col;
+  int w2 = dest.end_col - dest.start_col;
+  int h1 = src.end_row - src.start_row;
+  int h2 = dest.end_row - dest.start_row;
+  if (w1 <= 0 || w1 <= 0 || h1 <= 0 || h2 <= 0 || w1 != w2 || h1 != h2) {
+    return;
+  }
+  if (src.start_col < 0 || src.end_col > cols || dest.start_col < 0 || dest.end_col > cols) {
+    return;
+  }
+  if (src.start_row < 0 || src.end_row > lines || dest.start_row < 0 || dest.end_row > lines) {
+    return;
+  }
+  Rect r1 = terminalRectToRFBRect(src.start_col, src.end_col, src.start_row, src.end_row);
+  Rect r2 = terminalRectToRFBRect(dest.start_col, dest.end_col, dest.start_row, dest.end_row);
+  int wr = r1.width();
+  int hr = r1.height();
+  uint32_t* buffer = new uint32_t[wr * hr];
+  if (!buffer) {
+    return;
+  }
+  int stride;
+  uint32_t* srcBuffer = (uint32_t *)pb->getBuffer(r1, &stride);
+  for (int i = 0; i < hr; ++i) {
+    memcpy(buffer + i * wr, srcBuffer + i * stride, wr * sizeof(uint32_t));
+  }
+  uint32_t* destBuffer = (uint32_t *)pb->getBufferRW(r2, &stride);
+  for (int i = 0; i < hr; ++i) {
+    memcpy(destBuffer + i * stride, buffer + i * wr, wr * sizeof(uint32_t));
+  }
+  if (server) {
+    try {
+      server->add_copied(r2, r2.tl.subtract(r1.tl));
+    } catch (rfb::Exception& e) {
+      vlog.error("Add copied: %s", e.str());
+    }
+  }
+  delete[] buffer;
+}
+
+void TerminalDesktop::erase(VTermRect rect, int selective) {
+  int x1 = rect.start_col;
+  int x2 = rect.end_col;
+  int y1 = rect.start_row;
+  int y2 = rect.end_row;
+  if (x2 <= x1 || y2 <= y1) {
+    return;
+  }
+  if (x1 < 0 || y1 < 0 || x2 > cols || y2 > lines) {
+    return;
+  }
+  Rect r = terminalRectToRFBRect(rect.start_col, rect.end_col, rect.start_row, rect.end_row);
+  int w = r.width();
+  int h = r.height();
+  int stride;
+  uint32_t* buffer = (uint32_t *)pb->getBuffer(r, &stride);
+  for (int i = 0; i < h; ++i) {
+    for (int j = 0; j < w; ++j) {
+      buffer[i * stride + j] = defaultBGColor;
+    }
+  }
+  if (server) {
+    try {
+      server->add_changed(r);
+    } catch (rfb::Exception& e) {
+      vlog.error("Add changed: %s", e.str());
+    }
+  }
+}
+
 void TerminalDesktop::terminalOutputCallback(const char* s, size_t len, void* user) {
   TerminalDesktop* desktop = (TerminalDesktop *)user;
   desktop->terminalOutput(s, len);
@@ -267,7 +367,31 @@ void TerminalDesktop::putGlyph(VTermGlyphInfo* info, VTermPos pos) {
   uint32_t ch = info->chars[0];
   int x = pos.col;
   int y = pos.row;
+  if (x < 0 || x >= cols || y < 0 || y >= lines) {
+    return;
+  }
   int width = info->width;
+  uint32_t fg = defaultFGColor;
+  uint32_t bg = defaultBGColor;
+  VTermColor fgc = cell.fg;
+  VTermColor bgc = cell.bg;
+  if (!VTERM_COLOR_IS_DEFAULT_FG(&fgc)) {
+    vterm_state_convert_color_to_rgb(vtState, &fgc);
+    fg = (fgc.rgb.red << 24) | (fgc.rgb.green << 16) | (fgc.rgb.blue << 8);
+  }
+  if (!VTERM_COLOR_IS_DEFAULT_BG(&bgc)) {
+    vterm_state_convert_color_to_rgb(vtState, &bgc);
+    bg = (bgc.rgb.red << 24) | (bgc.rgb.green << 16) | (fgc.rgb.blue << 8);
+  }
+  renderGlyph(x, y, width, ch, fg, bg);
+}
+
+void TerminalDesktop::renderCell(const VTermScreenCell& cell, int x, int y) {
+  uint32_t ch = cell.chars[0];
+  if (x < 0 || x >= cols || y < 0 || y >= lines) {
+    return;
+  }
+  int width = cell.width;
   uint32_t fg = defaultFGColor;
   uint32_t bg = defaultBGColor;
   VTermColor fgc = cell.fg;
@@ -292,6 +416,9 @@ void TerminalDesktop::terminalOutput(const char* s, size_t len) {
 void TerminalDesktop::renderGlyph(int x, int y, int width, uint32_t ch, uint32_t fg, uint32_t bg) {
   if (width > 2) {
     width = 2;
+  }
+  if (x == cols - 1) {
+    width = 1;
   }
   Rect glyphRect = terminalPosToRFBRect(x, y, width);
   int stride;
