@@ -279,7 +279,7 @@ int main(int argc, char** argv)
       desktopMux.reset(new DesktopMux());
       terminalDesktop.reset(new TerminalDesktop(&terminalGeo));
       Greeter greeter(rdpArgc, rdpArgv, caughtSignal, *terminalDesktop.get());
-      if (!terminalDesktop->initTerminal(48, 64)) {
+      if (!terminalDesktop->initTerminal(-1, -1)) {
         return -1;
       }
       desktopMux->desktop = terminalDesktop.get();

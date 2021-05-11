@@ -77,7 +77,8 @@ void Greeter::handle(int infd, int outfd) {
   client.reset(nullptr);
   //FILE* infile = fdopen(infd, "rb");
   //FILE* outfile = fdopen(outfd, "wb");
-  string strBanner = "请输入用户名及密码以登录系统。\r\n";
+  string strBanner = "欢迎使用Vlab。请输入用户名及密码以登录系统。\r\n"
+    "请注意为Linux或Windows系统的用户名密码而非学号或工号和密码！\r\n";
   string strUsername = "用户名：";
   string strPassword = "\r\n密码：";
   string strResolution = "\r\n分辨率：";

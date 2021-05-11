@@ -28,7 +28,7 @@
 #include <unixcommon.h>
 
 #include <rdp2vnc/Geometry.h>
-#include <rdp2vnc/tmt.h>
+#include <vterm.h>
 
 class TerminalDesktop : public rfb::SDesktop
 {
@@ -53,20 +53,27 @@ public:
   virtual void handleClipboardData(const char* data);
   int getInFd();
   int* getOutFds();
-  TMT* getTerminal();
+  VTerm* getTerminal();
   std::pair<int, int> getRequestedDesktopSize();
   const Geometry& getGeometry();
 private:
   rfb::ScreenSet computeScreenLayout();
-  static void callbackTMT(tmt_msg_t m, TMT* vt, const void* a, void* p);
-  void processTerminalEvent(tmt_msg_t m, TMT* vt, const void* arg);
-  rfb::Rect terminalPosToRFBRect(int x, int y);
+  static int statePutGlyph(VTermGlyphInfo* info, VTermPos pos, void* user);
+  static void terminalOutputCallback(const char* s, size_t len, void* user);
+  void putGlyph(VTermGlyphInfo* info, VTermPos pos);
+  void terminalOutput(const char* s, size_t len);
+  void renderGlyph(int x, int y, int width, uint32_t ch, uint32_t fg, uint32_t bg);
+  rfb::Rect terminalPosToRFBRect(int x, int y, int width);
   rfb::Rect terminalLineToRFBRect(int line);
   Geometry* geometry;
   std::unique_ptr<rfb::ManagedPixelBuffer> pb;
   rfb::VNCServer* server;
   bool running;
-  TMT* vt;
+  VTerm* vt;
+  VTermScreen* vtScreen;
+  VTermState* vtState;
+  VTermScreenCallbacks screenCallbacks;
+  VTermStateCallbacks stateCallbacks;
   int lines;
   int cols;
   int inPipeFd[2];
@@ -74,6 +81,8 @@ private:
   std::unordered_set<uint32_t> pressedKeys;
   int requestedWidth;
   int requestedHeight;
+  int defaultFGColor;
+  int defaultBGColor;
 };
 
 bool runTerminal(TerminalDesktop* desktop, rfb::VNCServerST* server,
