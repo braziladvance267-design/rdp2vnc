@@ -44,6 +44,8 @@ bool readLine(int infd, int outfd, const string &prompt, string &line, bool visi
   }
   char ch;
   char mask = '*';
+  size_t cursor = line.length();
+  string csiCommand;
   while (true) {
     if (read(infd, &ch, 1) <= 0) {
       return false;
@@ -51,18 +53,37 @@ bool readLine(int infd, int outfd, const string &prompt, string &line, bool visi
     if (ch == '\r' || ch == '\n') {
       break;
     } else if (ch == '\b' || ch == 127) {
-      if (!line.empty()) {
-        if (write(outfd, "\e[1D \e[1D", 9) <= 0) {
+      if (cursor == line.length()) {
+        if (!line.empty()) {
+          --cursor;
+          if (write(outfd, "\e[D \e[D", 7) <= 0) {
+            return false;
+          }
+          line = line.substr(0, line.length() - 1);
+        }
+      } else if (cursor > 0) {
+        const string& s1 = line.substr(0, cursor - 1);
+        const string& s2 = line.substr(cursor);
+        --cursor;
+        line = s1 + s2;
+        string echo = "\e[D\e[K";
+        if (visible) {
+          echo += s2;
+        } else {
+          echo.resize(echo.length() + s2.length(), mask);
+        }
+        echo += "\e[" + to_string(s2.length()) + "D";
+        if (write(outfd, echo.c_str(), echo.length()) <= 0) {
           return false;
         }
-        line = line.substr(0, line.length() - 1);
       }
     } else if (ch == '\e') {
-      // ignore CSI
+      csiCommand = ch;
       while (true) {
         if (read(infd, &ch, 1) <= 0) {
           return false;
         }
+        csiCommand += ch;
         if ((ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z')) {
           break;
         }
@@ -81,10 +102,39 @@ bool readLine(int infd, int outfd, const string &prompt, string &line, bool visi
           break;
         }
       }
+      if (csiCommand == "\e[D" && cursor >= 1) {
+        if (write(outfd, csiCommand.c_str(), csiCommand.length()) <= 0) {
+          return false;
+        }
+        --cursor;
+      } else if (csiCommand == "\e[C" && cursor < line.length()) {
+        if (write(outfd, csiCommand.c_str(), csiCommand.length()) <= 0) {
+          return false;
+        }
+        ++cursor;
+      }
     } else {
-      line += ch;
-      if (write(outfd, visible ? &ch : &mask, 1) <= 0) {
-        return false;
+      if (cursor == line.length()) {
+        line += ch;
+        ++cursor;
+        if (write(outfd, visible ? &ch : &mask, 1) <= 0) {
+          return false;
+        }
+      } else {
+        const string& s1 = line.substr(0, cursor);
+        const string& s2 = line.substr(cursor);
+        line = s1 + ch + s2;
+        string echo;
+        ++cursor;
+        if (visible) {
+          echo = ch + s2;
+        } else {
+          echo.resize(s2.length() + 1, mask);
+        }
+        echo += "\e[" + to_string(s2.length()) + "D";
+        if (write(outfd, echo.c_str(), echo.length()) <= 0) {
+          return false;
+        }
       }
     }
   }
@@ -95,7 +145,7 @@ void Greeter::handle(int infd, int outfd) {
   //if (fork() == 0) {
   //  dup2(infd, 0);
   //  dup2(outfd, 1);
-  //  execlp("/usr/bin/nano", "/usr/bin/nano", NULL);
+  //  execlp("/usr/bin/w3m", "/usr/bin/w3m", "https://www.google.com", NULL);
   //}
   //while (true) {}
   //return;
@@ -108,7 +158,8 @@ void Greeter::handle(int infd, int outfd) {
   client.reset(nullptr);
   //FILE* infile = fdopen(infd, "rb");
   //FILE* outfile = fdopen(outfd, "wb");
-  string strBanner = "\e[37;44;4;1m欢迎使用Vlab。请输入用户名及密码以登录系统。\r\n"
+  string strBanner =
+    "欢迎使用Vlab。请输入用户名及密码以登录系统。\r\n"
     "请注意为Linux或Windows系统的用户名密码而非学号或工号和密码！\r\n";
   string strUsername = "用户名：";
   string strPassword = "\r\n密码：";

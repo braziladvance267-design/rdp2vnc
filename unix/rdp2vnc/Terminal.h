@@ -60,8 +60,11 @@ private:
   rfb::ScreenSet computeScreenLayout();
   static void terminalOutputCallback(const char* s, size_t len, void* user);
   static int screenDamage(VTermRect rect, void* user);
+  static int screenMoveCursor(VTermPos pos, VTermPos oldpos, int visible, void* user);
   void damage(VTermRect rect);
-  void renderCell(VTermPos pos);
+  void moveCursor(VTermPos pos, VTermPos oldpos, bool visible);
+  void renderCursor(VTermPos pos);
+  void renderCell(VTermPos pos, bool reverse = false);
   void terminalOutput(const char* s, size_t len);
   void renderGlyph(int x, int y, int width, uint32_t ch, uint32_t fg, uint32_t bg);
   rfb::Rect terminalPosToRFBRect(int x, int y, int width);

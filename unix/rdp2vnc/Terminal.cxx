@@ -104,6 +104,7 @@ bool TerminalDesktop::initTerminal(int lines, int cols) {
   vterm_state_reset(vtState, 1);
   memset(&screenCallbacks, 0, sizeof(VTermScreenCallbacks));
   screenCallbacks.damage = screenDamage;
+  screenCallbacks.movecursor = screenMoveCursor;
   vterm_screen_set_callbacks(vtScreen, &screenCallbacks, this);
   vterm_output_set_callback(vt, terminalOutputCallback, this);
   VTermColor fg, bg;
@@ -304,6 +305,12 @@ int TerminalDesktop::screenDamage(VTermRect rect, void* user) {
   return 1;
 }
 
+int TerminalDesktop::screenMoveCursor(VTermPos pos, VTermPos oldpos, int visible, void* user) {
+  TerminalDesktop* desktop = (TerminalDesktop *)user;
+  desktop->moveCursor(pos, oldpos, visible);
+  return 1;
+}
+
 void TerminalDesktop::damage(VTermRect rect) {
   int x1 = rect.start_col;
   int x2 = rect.end_col;
@@ -323,13 +330,41 @@ void TerminalDesktop::damage(VTermRect rect) {
   }
 }
 
-void TerminalDesktop::renderCell(VTermPos pos) {
+void TerminalDesktop::moveCursor(VTermPos pos, VTermPos oldpos, bool visible) {
+  if (pos.row < 0 || pos.row >= lines || pos.col < 0 || pos.col >= cols) {
+    return;
+  }
+  if (visible) {
+    renderCursor(pos);
+  }
+  if (oldpos.row < 0 || oldpos.row >= lines || oldpos.col < 0 || oldpos.col >= cols) {
+    return;
+  }
+  renderCell(oldpos);
+}
+
+void TerminalDesktop::renderCursor(VTermPos pos) {
+  VTermScreenCell cell;
+  if (!vterm_screen_get_cell(vtScreen, pos, &cell)) {
+    return;
+  }
+  int x = pos.col;
+  int y = pos.row;
+  uint32_t ch = cell.chars[0];
+  if (ch == (uint32_t)(-1)) {
+    renderGlyph(x, y, 1, 0, defaultBGColor, defaultFGColor);
+  } else {
+    renderCell(pos, true);
+  }
+}
+
+void TerminalDesktop::renderCell(VTermPos pos, bool reverse) {
   VTermScreenCell cell;
   if (!vterm_screen_get_cell(vtScreen, pos, &cell)) {
     return;
   }
   uint32_t ch = cell.chars[0];
-  if ((int32_t)ch == -1) {
+  if (ch == (uint32_t)(-1)) {
     return;
   }
   int x = pos.col;
@@ -349,6 +384,9 @@ void TerminalDesktop::renderCell(VTermPos pos) {
   if (!VTERM_COLOR_IS_DEFAULT_BG(&bgc)) {
     vterm_state_convert_color_to_rgb(vtState, &bgc);
     bg = (bgc.rgb.red << 16) | (bgc.rgb.green << 8) | fgc.rgb.blue;
+  }
+  if (reverse) {
+    swap(fg, bg);
   }
   renderGlyph(x, y, width, ch, fg, bg);
 }
