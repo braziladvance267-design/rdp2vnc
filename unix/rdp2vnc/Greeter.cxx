@@ -142,13 +142,6 @@ bool readLine(int infd, int outfd, const string &prompt, string &line, bool visi
 }
 
 void Greeter::handle(int infd, int outfd) {
-  //if (fork() == 0) {
-  //  dup2(infd, 0);
-  //  dup2(outfd, 1);
-  //  execlp("/usr/bin/w3m", "/usr/bin/w3m", "https://www.google.com", NULL);
-  //}
-  //while (true) {}
-  //return;
   // Firstly we try to log in the RDP server without credentials
   client.reset(new RDPClient(argc, argv, stopSignal));
   if (client->init(nullptr, nullptr, nullptr, -1, -1) &&
@@ -161,9 +154,9 @@ void Greeter::handle(int infd, int outfd) {
   string strBanner =
     "欢迎使用Vlab。请输入用户名及密码以登录系统。\r\n"
     "请注意为Linux或Windows系统的用户名密码而非学号或工号和密码！\r\n";
-  string strUsername = "用户名：";
-  string strPassword = "\r\n密码：";
-  string strResolution = "\r\n分辨率：";
+  string strUsername = "用户名: ";
+  string strPassword = "\r\n密码: ";
+  string strResolution = "\r\n分辨率: ";
   string strInvisible = "*";
   string strWait = "\r\n登录中，请稍候…\r\n";
   string strFailed = "登录失败！请重试。\r\n";

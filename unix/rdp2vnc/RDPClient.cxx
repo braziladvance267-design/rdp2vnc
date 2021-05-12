@@ -310,14 +310,10 @@ bool RDPClient::beginPaint() {
 
 bool RDPClient::endPaint() {
   rdpGdi* gdi = context->gdi;
-  //HGDI_RGN invalid = gdi->primary->hdc->hwnd->invalid;
   if (gdi->primary->hdc->hwnd->invalid->null) {
     return true;
   }
-  //int x = invalid->x;
-  //int y = invalid->y;
-  //int w = invalid->w;
-  //int h = invalid->h;
+  hasChangedSize = false;
   int ninvalid = gdi->primary->hdc->hwnd->ninvalid;
   HGDI_RGN cinvalid = gdi->primary->hdc->hwnd->cinvalid;
   for (int i = 0; i < ninvalid; ++i) {
@@ -385,15 +381,19 @@ bool RDPClient::pointerSet(RDPPointerImpl* pointer) {
   int x = pointer->x;
   int y = pointer->y;
   Point hotspot(x, y);
-  if (desktop && desktop->server) {
-    try {
-      desktop->server->setCursor(width, height, hotspot, pointer->buffer);
-    } catch (rdr::Exception& e) {
-      vlog.error("Set cursor: %s", e.str());
+  lastCursor.reset(new RDPCursor(pointer->buffer, pointer->size, width, height, x, y));
+  if (hasChangedSize) {
+    hasPendingPointer = true;
+  } else {
+    if (desktop && desktop->server) {
+      hasPendingPointer = false;
+      try {
+        desktop->server->setCursor(width, height, hotspot, pointer->buffer);
+      } catch (rdr::Exception& e) {
+        vlog.error("Set cursor: %s", e.str());
+      }
     }
   }
-
-  lastCursor.reset(new RDPCursor(pointer->buffer, pointer->size, width, height, x, y));
   if (desktop && !desktop->server) {
     desktop->setFirstCursor(lastCursor);
   }
@@ -401,16 +401,21 @@ bool RDPClient::pointerSet(RDPPointerImpl* pointer) {
 }
 
 bool RDPClient::pointerSetPosition(uint32_t x, uint32_t y) {
-  if (desktop && desktop->server) {
-    try {
-      desktop->server->setCursorPos(Point(x, y), false);
-    } catch (rdr::Exception& e) {
-      vlog.error("Set cursor position: %s", e.str());
-    }
-  }
   if (lastCursor) {
     lastCursor->posX = x;
     lastCursor->posY = y;
+  }
+  if (hasChangedSize) {
+    hasPendingPointer = true;
+  } else {
+    if (desktop && desktop->server) {
+      hasPendingPointer = false;
+      try {
+        desktop->server->setCursorPos(Point(x, y), false);
+      } catch (rdr::Exception& e) {
+        vlog.error("Set cursor position: %s", e.str());
+      }
+    }
   }
   return true;
 }
@@ -620,7 +625,7 @@ RDPClient::RDPClient(int argc_, char** argv_, bool& stopSignal_)
     hasSentCliprdrFormats(false), oldButtonMask(0), cliprdrRequestedFormatId(-1),
     hasCapsLocked(false), hasSyncedCapsLocked(false), hasAnnouncedClipboard(false),
     isClientClipboardAvailable(false), hasClientRequestedClipboard(false), hasReceivedDisplayControlCaps(false),
-    hasChangedSize(false)
+    hasChangedSize(false), hasPendingPointer(false)
 {
 }
 
@@ -731,25 +736,7 @@ bool RDPClient::waitConnect() {
 }
 
 void RDPClient::processsEvents() {
-  //int64_t now = getMSTimestamp();
-  //int64_t pastChange = now - lastChangeSizeTime;
-  //int64_t pastLastProcess = now - lastProcessTime;
-  //// we send the pointer every 100ms after changing the desktop size util 1s has past
-  //// because previous messages may have been invalidated.
-  //if (hasChangedSize && lastCursor) {
-  //  if (pastChange >= 1000) {
-  //    hasChangedSize = false;
-  //  }
-  //  if (pastLastProcess >= 100) {
-  //    try {
-  //      desktop->server->setCursor(lastCursor->width, lastCursor->height,
-  //        Point(lastCursor->x, lastCursor->y), lastCursor->data);
-  //    } catch (rdr::Exception& e) {
-  //      vlog.error("Set cursor: %s", e.str());
-  //    }
-  //    lastProcessTime = now;
-  //  }
-  //}
+  sendPendingPointer();
 }
 
 bool RDPClient::startThread() {
@@ -790,6 +777,25 @@ void RDPClient::eventLoop() {
       }
     }
   }
+}
+
+void RDPClient::sendPendingPointer() {
+  if (lastCursor && desktop && desktop->server) {
+    try {
+      desktop->server->setCursor(lastCursor->width, lastCursor->height,
+        Point(lastCursor->x, lastCursor->y), lastCursor->data);
+    } catch (rdr::Exception& e) {
+      vlog.error("Set cursor: %s", e.str());
+    }
+    if (lastCursor->posX >= 0 && lastCursor->posY >= 0) {
+      try {
+        desktop->server->setCursorPos(Point(lastCursor->posX, lastCursor->posY), false);
+      } catch (rdr::Exception& e) {
+        vlog.error("Set cursor position: %s", e.str());
+      }
+    }
+  }
+  hasPendingPointer = false;
 }
 
 int RDPClient::width() {

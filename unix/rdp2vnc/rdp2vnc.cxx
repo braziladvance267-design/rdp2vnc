@@ -62,6 +62,8 @@ BoolParameter localhostOnly("localhost",
                             false);
 BoolParameter rdpArg("RdpArg", "Command line arguments after this are for freerdp client", false);
 BoolParameter interactiveLogin("InteractiveLogin", "Show an interactive greeter", false);
+IntParameter terminalWidth("TerminalWidth", "Width of the interactive login terminal", 1024);
+IntParameter terminalHeight("TerminalHeight", "Width of the interactive login terminal", 768);
 
 //
 // Allow the main loop terminate itself gracefully on receiving a signal.
@@ -272,7 +274,7 @@ int main(int argc, char** argv)
   std::unique_ptr<DesktopMux> desktopMux;
   std::unique_ptr<TerminalDesktop> terminalDesktop;
   std::list<SocketListener*> listeners;
-  Geometry terminalGeo(1024, 768);
+  Geometry terminalGeo((int)terminalWidth, (int)terminalHeight);
 
   if (interactiveLogin) {
     try {
@@ -435,151 +437,4 @@ int main(int argc, char** argv)
   vlog.info("Terminated");
 
   return 0;
-  /*
-
-  RDPClient rdpClient(rdpArgc, rdpArgv);
-  if (!rdpClient.init() || !rdpClient.start() || !rdpClient.waitConnect()) {
-    return -1;
-  }
-
-  signal(SIGHUP, CleanupSignalHandler);
-  signal(SIGINT, CleanupSignalHandler);
-  signal(SIGTERM, CleanupSignalHandler);
-
-  std::list<SocketListener*> listeners;
-
-  try {
-    Geometry geo(rdpClient.width(), rdpClient.height());
-    RDPDesktop desktop(&geo, &rdpClient);
-
-    VNCServerST server("rdp2vnc", &desktop);
-    rdpClient.setRDPDesktop(&desktop);
-
-    if (rfbunixpath.getValueStr()[0] != '\0') {
-      listeners.push_back(new network::UnixListener(rfbunixpath, rfbunixmode));
-      vlog.info("Listening on %s (mode %04o)", (const char*)rfbunixpath, (int)rfbunixmode);
-    }
-
-    if ((int)rfbport != -1) {
-      if (localhostOnly)
-        createLocalTcpListeners(&listeners, (int)rfbport);
-      else
-        createTcpListeners(&listeners, 0, (int)rfbport);
-      vlog.info("Listening on port %d", (int)rfbport);
-    }
-
-    const char *hostsData = hostsFile.getData();
-    FileTcpFilter fileTcpFilter(hostsData);
-    if (strlen(hostsData) != 0)
-      for (std::list<SocketListener*>::iterator i = listeners.begin();
-           i != listeners.end();
-           i++)
-        (*i)->setFilter(&fileTcpFilter);
-    delete[] hostsData;
-
-    rdpClient.startThread();
-
-    while (!caughtSignal) {
-      struct timeval tv;
-      fd_set rfds, wfds;
-      std::list<Socket*> sockets;
-      std::list<Socket*>::iterator i;
-      {
-        std::lock_guard<std::mutex> lock(rdpClient.getMutex());
-        
-        FD_ZERO(&rfds);
-        FD_ZERO(&wfds);
-
-        for (std::list<SocketListener*>::iterator i = listeners.begin();
-             i != listeners.end();
-             i++)
-          FD_SET((*i)->getFd(), &rfds);
-
-        server.getSockets(&sockets);
-        int clients_connected = 0;
-        for (i = sockets.begin(); i != sockets.end(); i++) {
-          if ((*i)->isShutdown()) {
-            server.removeSocket(*i);
-            delete (*i);
-          } else {
-            FD_SET((*i)->getFd(), &rfds);
-            if ((*i)->outStream().hasBufferedData())
-              FD_SET((*i)->getFd(), &wfds);
-            clients_connected++;
-          }
-        }
-      }
-
-      tv.tv_sec = 0;
-      tv.tv_usec = 10000;
-      // Do the wait...
-      int n = select(FD_SETSIZE, &rfds, &wfds, 0, &tv);
-
-      if (n < 0) {
-        if (errno == EINTR) {
-          vlog.debug("Interrupted select() system call");
-          continue;
-        } else {
-          throw rdr::SystemException("select", errno);
-        }
-      }
-
-
-      {
-        std::lock_guard<std::mutex> lock(rdpClient.getMutex());
-        // Accept new VNC connections
-        for (std::list<SocketListener*>::iterator i = listeners.begin();
-             i != listeners.end();
-             i++) {
-          if (FD_ISSET((*i)->getFd(), &rfds)) {
-            Socket* sock = (*i)->accept();
-            if (sock) {
-              server.addSocket(sock);
-            } else {
-              vlog.status("Client connection rejected");
-            }
-          }
-        }
-
-        Timer::checkTimeouts();
-
-        // Client list could have been changed.
-        server.getSockets(&sockets);
-
-        // Nothing more to do if there are no client connections.
-        if (sockets.empty())
-          continue;
-
-        // Process events on existing VNC connections
-        for (i = sockets.begin(); i != sockets.end(); i++) {
-          if (FD_ISSET((*i)->getFd(), &rfds)) {
-            server.processSocketReadEvent(*i);
-          }
-          if (FD_ISSET((*i)->getFd(), &wfds)) {
-            server.processSocketWriteEvent(*i);
-          }
-        }
-      }
-
-      // Process events on RDP connection
-      rdpClient.processsEvents();
-    }
-
-  } catch (rdr::Exception &e) {
-    vlog.error("%s", e.str());
-    return 1;
-  }
-
-  // Run listener destructors; remove UNIX sockets etc
-  for (std::list<SocketListener*>::iterator i = listeners.begin();
-       i != listeners.end();
-       i++) {
-    delete *i;
-  }
-
-  rdpClient.stop();
-
-  vlog.info("Terminated");
-  return 0;
-  */
 }

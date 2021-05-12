@@ -85,10 +85,10 @@ TerminalDesktop::~TerminalDesktop() {
 }
 
 bool TerminalDesktop::initTerminal(int lines, int cols) {
-  if (lines == -1) {
+  if (lines == -1 || lines * glyphHeight > geometry->height()) {
     lines = geometry->height() / glyphHeight;
   }
-  if (cols == -1) {
+  if (cols == -1 || cols * glyphWidth / 2 > geometry->width()) {
     cols = geometry->width() / (glyphWidth / 2);
   }
   this->lines = lines;

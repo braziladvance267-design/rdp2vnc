@@ -121,6 +121,7 @@ private:
   void channelConnected(ChannelConnectedEventArgs* e);
   void channelDisconnected(ChannelDisconnectedEventArgs* e);
   void eventLoop();
+  void sendPendingPointer();
 
   int argc;
   char** argv;
@@ -147,6 +148,7 @@ private:
   bool hasClientRequestedClipboard;
   bool hasReceivedDisplayControlCaps;
   bool hasChangedSize;
+  bool hasPendingPointer;
   int maxNumMonitors;
   int maxMonitorAreaFactorA;
   int maxMonitorAreaFactorB;
