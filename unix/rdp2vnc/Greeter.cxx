@@ -92,6 +92,13 @@ bool readLine(int infd, int outfd, const string &prompt, string &line, bool visi
 }
 
 void Greeter::handle(int infd, int outfd) {
+  //if (fork() == 0) {
+  //  dup2(infd, 0);
+  //  dup2(outfd, 1);
+  //  execlp("/usr/bin/nano", "/usr/bin/nano", NULL);
+  //}
+  //while (true) {}
+  //return;
   // Firstly we try to log in the RDP server without credentials
   client.reset(new RDPClient(argc, argv, stopSignal));
   if (client->init(nullptr, nullptr, nullptr, -1, -1) &&
@@ -101,7 +108,7 @@ void Greeter::handle(int infd, int outfd) {
   client.reset(nullptr);
   //FILE* infile = fdopen(infd, "rb");
   //FILE* outfile = fdopen(outfd, "wb");
-  string strBanner = "欢迎使用Vlab。请输入用户名及密码以登录系统。\r\n"
+  string strBanner = "\e[37;44;4;1m欢迎使用Vlab。请输入用户名及密码以登录系统。\r\n"
     "请注意为Linux或Windows系统的用户名密码而非学号或工号和密码！\r\n";
   string strUsername = "用户名：";
   string strPassword = "\r\n密码：";
